@@ -1,0 +1,39 @@
+ARG DOCKER_REGISTRY=docker.io/
+
+FROM ${DOCKER_REGISTRY}maven:3.9-eclipse-temurin-17 AS builder
+
+ARG DOCKER_REGISTRY
+ENV DOCKER_REGISTRY=${DOCKER_REGISTRY}
+
+WORKDIR /app
+
+COPY settings.xml /root/.m2/settings.xml
+
+COPY pom.xml ./
+
+RUN mvn compile -Dmaven.test.skip=true -Dspring-boot.repackage.skip=true -B --no-transfer-progress
+
+COPY src ./src
+
+RUN mvn clean package -DskipTests -Dmaven.test.skip=true -B --no-transfer-progress
+
+FROM ${DOCKER_REGISTRY}eclipse-temurin:17-jre-jammy
+
+ARG DOCKER_REGISTRY
+ENV DOCKER_REGISTRY=${DOCKER_REGISTRY}
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tzdata \
+    && cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
+    && echo "Asia/Shanghai" > /etc/timezone \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /app/target/bench-management-1.0.0.jar app.jar
+
+EXPOSE 8080
+
+ENV JAVA_OPTS="-Xms512m -Xmx1024m -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8"
+
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -Djava.security.egd=file:/dev/./urandom -jar app.jar"]

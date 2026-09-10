@@ -5,6 +5,7 @@ import com.example.benchmanagement.dto.BenchChangeRequest;
 import com.example.benchmanagement.dto.ChangeLogDTO;
 import com.example.benchmanagement.entity.Bench;
 import com.example.benchmanagement.entity.BenchChangeLog;
+import com.example.benchmanagement.entity.BenchInspection;
 import com.example.benchmanagement.entity.TreeNode;
 import com.example.benchmanagement.repository.BenchChangeLogRepository;
 import com.example.benchmanagement.repository.BenchRepository;
@@ -28,24 +29,65 @@ public class BenchService {
     private final TreeNodeRepository treeNodeRepository;
     private final BenchChangeLogRepository changeLogRepository;
     private final RedisTemplate<String, Object> redisTemplate;
+    private final InspectionService inspectionService;
+    private final RepairOrderService repairOrderService;
 
     private static final String REDIS_KEY_PREFIX = "bench:specs:";
 
     public List<BenchDTO> getAllBenches() {
+        return getAllBenches(null, null);
+    }
+
+    /**
+     * 查询全部长凳并附带最新巡检状态，可按巡检结果、严重程度筛选。
+     *
+     * @param inspectionResult 最新巡检结果：1-正常，0-异常；特殊值 2 表示从未巡检
+     * @param severity         最新巡检严重程度：1-低，2-中，3-高
+     */
+    public List<BenchDTO> getAllBenches(Integer inspectionResult, Integer severity) {
         List<Bench> benches = benchRepository.findAll();
-        return benches.stream().map(this::toDTO).toList();
+
+        List<Long> benchIds = benches.stream().map(Bench::getId).toList();
+        Map<Long, BenchInspection> latestMap = inspectionService.latestInspectionMap(benchIds);
+        Map<Long, Long> openOrderMap = repairOrderService.openOrderCountMap(benchIds);
+
+        return benches.stream()
+                .map(b -> toDTO(b, latestMap.get(b.getId()), openOrderMap.getOrDefault(b.getId(), 0L)))
+                .filter(dto -> matchesInspectionFilter(dto, inspectionResult, severity))
+                .toList();
+    }
+
+    private boolean matchesInspectionFilter(BenchDTO dto, Integer inspectionResult, Integer severity) {
+        if (inspectionResult != null) {
+            // 2 = 从未巡检
+            if (inspectionResult == 2) {
+                if (dto.getLatestInspectionResult() != null) {
+                    return false;
+                }
+            } else if (!Objects.equals(dto.getLatestInspectionResult(), inspectionResult)) {
+                return false;
+            }
+        }
+        if (severity != null && !Objects.equals(dto.getLatestInspectionSeverity(), severity)) {
+            return false;
+        }
+        return true;
     }
 
     public BenchDTO getBenchById(Long id) {
         Bench bench = benchRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("长凳不存在"));
-        return toDTO(bench);
+        Map<Long, BenchInspection> latestMap =
+                inspectionService.latestInspectionMap(List.of(id));
+        return toDTO(bench, latestMap.get(id), repairOrderService.countOpenOrders(id));
     }
 
     public BenchDTO getBenchByCode(String code) {
         Bench bench = benchRepository.findByCode(code)
                 .orElseThrow(() -> new IllegalArgumentException("长凳不存在"));
-        return toDTO(bench);
+        Map<Long, BenchInspection> latestMap =
+                inspectionService.latestInspectionMap(List.of(bench.getId()));
+        return toDTO(bench, latestMap.get(bench.getId()), repairOrderService.countOpenOrders(bench.getId()));
     }
 
     public List<BenchDTO> getBenchesByNode(Long nodeId) {
@@ -66,7 +108,12 @@ public class BenchService {
         }
 
         List<Bench> benches = benchRepository.findByNodeIds(targetNodeIds);
-        return benches.stream().map(this::toDTO).toList();
+        List<Long> benchIds = benches.stream().map(Bench::getId).toList();
+        Map<Long, BenchInspection> latestMap = inspectionService.latestInspectionMap(benchIds);
+        Map<Long, Long> openOrderMap = repairOrderService.openOrderCountMap(benchIds);
+        return benches.stream()
+                .map(b -> toDTO(b, latestMap.get(b.getId()), openOrderMap.getOrDefault(b.getId(), 0L)))
+                .toList();
     }
 
     @Transactional
@@ -93,7 +140,7 @@ public class BenchService {
         Bench saved = benchRepository.save(bench);
         cacheBenchSpecs(saved);
         log.info("创建长凳: id={}, code={}", saved.getId(), saved.getCode());
-        return toDTO(saved);
+        return toDTO(saved, null, 0L);
     }
 
     @Transactional
@@ -148,13 +195,22 @@ public class BenchService {
         Bench saved = benchRepository.save(bench);
         cacheBenchSpecs(saved);
         log.info("更新长凳: id={}, code={}", saved.getId(), saved.getCode());
-        return toDTO(saved);
+        Map<Long, BenchInspection> latestMap =
+                inspectionService.latestInspectionMap(List.of(id));
+        return toDTO(saved, latestMap.get(id), repairOrderService.countOpenOrders(id));
     }
 
     @Transactional
     public void deleteBench(Long id) {
         Bench bench = benchRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("长凳不存在"));
+
+        long openOrders = repairOrderService.countOpenOrders(id);
+        if (openOrders > 0) {
+            throw new IllegalStateException(String.format(
+                    "长凳【%s】仍有%d个未完成的维修工单（待处理/维修中），请先完成或关闭相关工单后再删除",
+                    bench.getCode(), openOrders));
+        }
 
         benchRepository.delete(bench);
         redisTemplate.delete(REDIS_KEY_PREFIX + id);
@@ -186,6 +242,10 @@ public class BenchService {
             assertCapacityAvailable(targetPoint, incomingCount);
         }
 
+        List<Long> resultBenchIds = benches.stream().map(Bench::getId).toList();
+        Map<Long, BenchInspection> latestMap = inspectionService.latestInspectionMap(resultBenchIds);
+        Map<Long, Long> openOrderMap = repairOrderService.openOrderCountMap(resultBenchIds);
+
         List<BenchDTO> results = new ArrayList<>();
         for (Bench bench : benches) {
             if (!bench.getNodeId().equals(request.getNewNodeId())) {
@@ -203,11 +263,9 @@ public class BenchService {
                 changeLogRepository.save(logEntry);
 
                 cacheBenchSpecs(bench);
-                results.add(toDTO(bench));
                 log.info("变更长凳点位: benchId={}, oldNodeId={}, newNodeId={}", bench.getId(), oldNodeId, request.getNewNodeId());
-            } else {
-                results.add(toDTO(bench));
             }
+            results.add(toDTO(bench, latestMap.get(bench.getId()), openOrderMap.getOrDefault(bench.getId(), 0L)));
         }
         return results;
     }
@@ -305,6 +363,10 @@ public class BenchService {
     }
 
     private BenchDTO toDTO(Bench bench) {
+        return toDTO(bench, null, 0L);
+    }
+
+    private BenchDTO toDTO(Bench bench, BenchInspection latestInspection, long openOrderCount) {
         TreeNode point = treeNodeRepository.findByIdAndIsDeletedFalse(bench.getNodeId()).orElse(null);
         TreeNode section = point != null && point.getParentId() != null
                 ? treeNodeRepository.findByIdAndIsDeletedFalse(point.getParentId()).orElse(null)
@@ -326,6 +388,11 @@ public class BenchService {
                 .nodeName(point != null ? point.getName() : "")
                 .sectionName(section != null ? section.getName() : "")
                 .districtName(district != null ? district.getName() : "")
+                .latestInspectionAt(latestInspection != null ? latestInspection.getInspectedAt() : null)
+                .latestInspectionResult(latestInspection != null ? latestInspection.getResult() : null)
+                .latestInspectionSeverity(latestInspection != null ? latestInspection.getSeverity() : null)
+                .latestProblemType(latestInspection != null ? latestInspection.getProblemType() : null)
+                .openOrderCount(openOrderCount)
                 .build();
     }
 

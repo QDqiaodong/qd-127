@@ -62,6 +62,50 @@ CREATE TABLE IF NOT EXISTS node_capacity_log (
     INDEX idx_adjusted_at (adjusted_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='点位容量调整记录表';
 
+CREATE TABLE IF NOT EXISTS bench_inspection (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    bench_id BIGINT NOT NULL COMMENT '被巡检长凳ID',
+    scope_node_id BIGINT COMMENT '巡检发起范围节点ID(街区/路段/点位)',
+    inspected_at DATETIME NOT NULL COMMENT '检查时间',
+    result TINYINT NOT NULL COMMENT '巡检结果：1-正常，0-异常',
+    problem_type VARCHAR(50) COMMENT '问题类型(如结构松动/漆面破损/椅面开裂等)',
+    severity TINYINT COMMENT '严重程度：1-低，2-中，3-高(仅异常时填写)',
+    description VARCHAR(1000) COMMENT '问题描述',
+    suggestion VARCHAR(1000) COMMENT '处理建议',
+    inspector VARCHAR(50) DEFAULT 'system' COMMENT '检查人',
+    repair_order_id BIGINT COMMENT '由该巡检异常生成的维修工单ID',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_bench_id (bench_id),
+    INDEX idx_inspected_at (inspected_at),
+    INDEX idx_result_severity (result, severity),
+    CONSTRAINT fk_inspection_bench FOREIGN KEY (bench_id) REFERENCES bench(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='长凳巡检记录表';
+
+CREATE TABLE IF NOT EXISTS repair_order (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    code VARCHAR(50) NOT NULL UNIQUE COMMENT '维修工单号',
+    bench_id BIGINT NOT NULL COMMENT '维修长凳ID',
+    inspection_id BIGINT COMMENT '来源巡检记录ID',
+    problem_type VARCHAR(50) COMMENT '问题类型',
+    severity TINYINT COMMENT '严重程度：1-低，2-中，3-高',
+    description VARCHAR(1000) COMMENT '问题描述',
+    suggestion VARCHAR(1000) COMMENT '处理建议',
+    status TINYINT NOT NULL DEFAULT 1 COMMENT '状态：1-待处理，2-维修中，3-已完成，4-已关闭',
+    repair_result VARCHAR(1000) COMMENT '维修结果(完成时必填)',
+    started_at DATETIME NULL COMMENT '开始维修时间',
+    completed_at DATETIME NULL COMMENT '维修完成时间(完成时必填)',
+    closed_at DATETIME NULL COMMENT '工单关闭时间',
+    created_by VARCHAR(50) DEFAULT 'system',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_bench_id (bench_id),
+    INDEX idx_status (status),
+    INDEX idx_severity (severity),
+    CONSTRAINT fk_repair_bench FOREIGN KEY (bench_id) REFERENCES bench(id),
+    CONSTRAINT fk_repair_inspection FOREIGN KEY (inspection_id) REFERENCES bench_inspection(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='长凳维修工单表';
+
 INSERT INTO tree_node (parent_id, level, name, sort_order, capacity) VALUES
 (NULL, 1, '商业步行街A区', 1, NULL),
 (NULL, 1, '商业步行街B区', 2, NULL),

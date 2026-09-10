@@ -30,6 +30,18 @@
           />
         </el-select>
         <el-input v-model="searchKeyword" placeholder="搜索编号/材质" class="filter-item" @keyup.enter="handleSearch" />
+        <el-select v-model="filterInspectionResult" placeholder="巡检状态" class="filter-item" @change="filterBenches">
+          <el-option label="全部巡检状态" :value="null" />
+          <el-option label="最新正常" :value="1" />
+          <el-option label="最新异常" :value="0" />
+          <el-option label="从未巡检" :value="2" />
+        </el-select>
+        <el-select v-model="filterSeverity" placeholder="严重程度" class="filter-item" @change="filterBenches">
+          <el-option label="全部程度" :value="null" />
+          <el-option label="低" :value="1" />
+          <el-option label="中" :value="2" />
+          <el-option label="高" :value="3" />
+        </el-select>
         <el-button @click="handleSearch">
           <el-icon><Search /></el-icon>
           搜索
@@ -63,11 +75,43 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200">
+        <el-table-column prop="latestInspectionAt" label="最近巡检时间" width="170">
+          <template #default="{ row }">{{ row.latestInspectionAt || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="巡检状态" width="100">
+          <template #default="{ row }">
+            <el-tag :type="inspectionResultTagType(row.latestInspectionResult)" size="small">
+              {{ inspectionResultLabel(row.latestInspectionResult) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="问题严重度" width="95">
+          <template #default="{ row }">
+            <el-tag v-if="row.latestInspectionResult === 0" :type="severityTagType(row.latestInspectionSeverity)" size="small">
+              {{ severityLabel(row.latestInspectionSeverity) }}
+            </el-tag>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="未完成工单" width="100">
+          <template #default="{ row }">
+            <el-tag v-if="row.openOrderCount > 0" type="danger" size="small">
+              {{ row.openOrderCount }} 个
+            </el-tag>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="260" fixed="right">
           <template #default="{ row }">
             <el-button size="small" @click="handleEdit(row)">编辑</el-button>
-            <el-button size="small" type="danger" @click="handleDelete(row)">删除</el-button>
-            <el-button size="small" @click="handleViewLogs(row)">变更记录</el-button>
+            <el-button
+              size="small"
+              type="danger"
+              :disabled="row.openOrderCount > 0"
+              @click="handleDelete(row)"
+            >删除</el-button>
+            <el-button size="small" @click="handleViewDetail(row)">详情</el-button>
+            <el-button size="small" link type="primary" @click="handleViewLogs(row)">变更记录</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -206,6 +250,101 @@
         <el-table-column prop="changedBy" label="操作人" />
       </el-table>
     </el-dialog>
+
+    <el-dialog v-model="detailDialogVisible" title="长凳详情" width="780px">
+      <el-descriptions :column="2" border size="small">
+        <el-descriptions-item label="长凳编号">{{ detailBench.code }}</el-descriptions-item>
+        <el-descriptions-item label="材质">{{ detailBench.material || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="长度(cm)">{{ detailBench.length ?? '-' }}</el-descriptions-item>
+        <el-descriptions-item label="宽度(cm)">{{ detailBench.width ?? '-' }}</el-descriptions-item>
+        <el-descriptions-item label="高度(cm)">{{ detailBench.height ?? '-' }}</el-descriptions-item>
+        <el-descriptions-item label="资产状态">
+          <el-tag :type="detailBench.status === 1 ? 'success' : 'danger'" size="small">
+            {{ detailBench.status === 1 ? '正常' : '停用' }}
+          </el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="所属街区">{{ detailBench.districtName || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="所属路段">{{ detailBench.sectionName || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="所属点位" :span="2">{{ detailBench.nodeName || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="最近巡检时间">{{ detailBench.latestInspectionAt || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="最新巡检状态">
+          <el-tag :type="inspectionResultTagType(detailBench.latestInspectionResult)" size="small">
+            {{ inspectionResultLabel(detailBench.latestInspectionResult) }}
+          </el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="最近问题类型">{{ detailBench.latestProblemType || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="最近严重程度">
+          <el-tag
+            v-if="detailBench.latestInspectionResult === 0"
+            :type="severityTagType(detailBench.latestInspectionSeverity)"
+            size="small"
+          >
+            {{ severityLabel(detailBench.latestInspectionSeverity) }}
+          </el-tag>
+          <span v-else>-</span>
+        </el-descriptions-item>
+        <el-descriptions-item label="未完成工单" :span="2">
+          <el-tag v-if="detailBench.openOrderCount > 0" type="danger" size="small">
+            {{ detailBench.openOrderCount }} 个（待处理/维修中）
+          </el-tag>
+          <span v-else>无</span>
+        </el-descriptions-item>
+      </el-descriptions>
+
+      <el-tabs class="detail-tabs">
+        <el-tab-pane label="巡检历史">
+          <el-table :data="detailInspections" border size="small" max-height="260">
+            <el-table-column prop="inspectedAt" label="检查时间" width="165" />
+            <el-table-column label="结果" width="80">
+              <template #default="{ row }">
+                <el-tag :type="inspectionResultTagType(row.result)" size="small">
+                  {{ inspectionResultLabel(row.result) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="严重度" width="70">
+              <template #default="{ row }">
+                {{ row.result === 0 ? severityLabel(row.severity) : '-' }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="problemType" label="问题类型" width="90">
+              <template #default="{ row }">{{ row.problemType || '-' }}</template>
+            </el-table-column>
+            <el-table-column prop="description" label="问题描述" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.description || '-' }}</template>
+            </el-table-column>
+            <el-table-column prop="suggestion" label="处理建议" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.suggestion || '-' }}</template>
+            </el-table-column>
+            <el-table-column prop="inspector" label="检查人" width="80" />
+          </el-table>
+        </el-tab-pane>
+        <el-tab-pane label="维修工单">
+          <el-table :data="detailOrders" border size="small" max-height="260">
+            <el-table-column prop="code" label="工单号" width="170" />
+            <el-table-column prop="problemType" label="问题类型" width="90">
+              <template #default="{ row }">{{ row.problemType || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="严重度" width="70">
+              <template #default="{ row }">{{ severityLabel(row.severity) }}</template>
+            </el-table-column>
+            <el-table-column label="状态" width="80">
+              <template #default="{ row }">
+                <el-tag :type="orderStatusTagType(row.status)" size="small">
+                  {{ orderStatusLabel(row.status) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="repairResult" label="维修结果" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.repairResult || '-' }}</template>
+            </el-table-column>
+            <el-table-column prop="completedAt" label="完成时间" width="165">
+              <template #default="{ row }">{{ row.completedAt || '-' }}</template>
+            </el-table-column>
+          </el-table>
+        </el-tab-pane>
+      </el-tabs>
+    </el-dialog>
   </div>
 </template>
 
@@ -215,6 +354,15 @@ import { Plus, Search, Edit, Delete } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getAllBenches, getBenchById, createBench, updateBench, deleteBench, changeBenchNode, getChangeLogs, getBenchesByNode } from '../api/bench'
 import { getTree } from '../api/tree'
+import { getInspectionsByBench, getRepairOrdersByBench } from '../api/inspection'
+import {
+  severityLabel,
+  severityTagType,
+  orderStatusLabel,
+  orderStatusTagType,
+  inspectionResultLabel,
+  inspectionResultTagType
+} from '../constants/inspection'
 
 const benchList = ref([])
 const districts = ref([])
@@ -224,6 +372,8 @@ const points = ref([])
 const filterDistrict = ref(null)
 const filterSection = ref(null)
 const filterPoint = ref(null)
+const filterInspectionResult = ref(null)
+const filterSeverity = ref(null)
 const searchKeyword = ref('')
 
 const selectedBenches = ref([])
@@ -262,6 +412,12 @@ const batchPoints = ref([])
 const logDialogVisible = ref(false)
 const changeLogs = ref([])
 
+// 长凳详情
+const detailDialogVisible = ref(false)
+const detailBench = ref({})
+const detailInspections = ref([])
+const detailOrders = ref([])
+
 const sectionMap = ref({})
 const pointMap = ref({})
 const pointInfoMap = ref({})
@@ -290,9 +446,45 @@ const batchIncomingCount = computed(() =>
   selectedBenches.value.filter(b => b.nodeId !== batchForm.value.newNodeId).length
 )
 
+const buildInspectionParams = () => {
+  const params = {}
+  if (filterInspectionResult.value !== null) {
+    params.inspectionResult = filterInspectionResult.value
+  }
+  if (filterSeverity.value !== null) {
+    params.severity = filterSeverity.value
+  }
+  return params
+}
+
+const clientFilterInspection = (list) => {
+  return list.filter(b => {
+    if (filterInspectionResult.value !== null) {
+      if (filterInspectionResult.value === 2) {
+        if (b.latestInspectionResult !== null && b.latestInspectionResult !== undefined) return false
+      } else if (b.latestInspectionResult !== filterInspectionResult.value) {
+        return false
+      }
+    }
+    if (filterSeverity.value !== null && b.latestInspectionSeverity !== filterSeverity.value) {
+      return false
+    }
+    return true
+  })
+}
+
+const applyKeyword = (list) => {
+  if (!searchKeyword.value) return list
+  const kw = searchKeyword.value.toLowerCase()
+  return list.filter(b =>
+    b.code.toLowerCase().includes(kw) ||
+    (b.material && b.material.toLowerCase().includes(kw))
+  )
+}
+
 const loadBenches = async () => {
   try {
-    benchList.value = await getAllBenches()
+    benchList.value = await getAllBenches(buildInspectionParams())
   } catch (error) {
     ElMessage.error('加载长凳数据失败')
   }
@@ -348,21 +540,20 @@ const handleSectionChange = () => {
 
 const filterBenches = async () => {
   try {
+    let list
     if (filterPoint.value) {
-      benchList.value = await getBenchesByNode(filterPoint.value)
+      list = await getBenchesByNode(filterPoint.value)
     } else if (filterSection.value) {
-      benchList.value = await getBenchesByNode(filterSection.value)
+      list = await getBenchesByNode(filterSection.value)
     } else if (filterDistrict.value) {
-      benchList.value = await getBenchesByNode(filterDistrict.value)
+      list = await getBenchesByNode(filterDistrict.value)
     } else {
-      benchList.value = await getAllBenches()
+      list = await getAllBenches(buildInspectionParams())
+      benchList.value = applyKeyword(list)
+      return
     }
-    if (searchKeyword.value) {
-      benchList.value = benchList.value.filter(b =>
-        b.code.toLowerCase().includes(searchKeyword.value.toLowerCase()) ||
-        (b.material && b.material.toLowerCase().includes(searchKeyword.value.toLowerCase()))
-      )
-    }
+    // 按树形节点查询的结果在前端补充巡检状态/严重程度筛选
+    benchList.value = applyKeyword(clientFilterInspection(list))
   } catch (error) {
     ElMessage.error('筛选失败')
   }
@@ -376,6 +567,8 @@ const handleReset = () => {
   filterDistrict.value = null
   filterSection.value = null
   filterPoint.value = null
+  filterInspectionResult.value = null
+  filterSeverity.value = null
   searchKeyword.value = ''
   sections.value = []
   points.value = []
@@ -510,8 +703,12 @@ const handleSubmit = async () => {
 }
 
 const handleDelete = async (row) => {
+  if (row.openOrderCount > 0) {
+    ElMessage.warning(`长凳【${row.code}】仍有${row.openOrderCount}个未完成的维修工单（待处理/维修中），请先完成或关闭相关工单后再删除`)
+    return
+  }
   try {
-    await ElMessageBox.confirm('确定删除该长凳吗？', '提示', {
+    await ElMessageBox.confirm(`确定删除长凳【${row.code}】吗？`, '提示', {
       confirmButtonText: '确定',
       cancelButtonText: '取消',
       type: 'warning'
@@ -523,6 +720,22 @@ const handleDelete = async (row) => {
     if (error !== 'cancel') {
       ElMessage.error(error.message || '删除失败')
     }
+  }
+}
+
+const handleViewDetail = async (row) => {
+  try {
+    const [bench, inspections, orders] = await Promise.all([
+      getBenchById(row.id),
+      getInspectionsByBench(row.id),
+      getRepairOrdersByBench(row.id)
+    ])
+    detailBench.value = bench
+    detailInspections.value = inspections
+    detailOrders.value = orders
+    detailDialogVisible.value = true
+  } catch (error) {
+    ElMessage.error(error.message || '获取长凳详情失败')
   }
 }
 

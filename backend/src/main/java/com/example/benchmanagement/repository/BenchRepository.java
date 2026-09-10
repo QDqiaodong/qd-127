@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -16,7 +17,7 @@ public interface BenchRepository extends JpaRepository<Bench, Long> {
     List<Bench> findByNodeId(Long nodeId);
 
     @Query("SELECT b FROM Bench b WHERE b.nodeId IN :nodeIds")
-    List<Bench> findByNodeIds(List<Long> nodeIds);
+    List<Bench> findByNodeIds(@org.springframework.data.repository.query.Param("nodeIds") Collection<Long> nodeIds);
 
     @Query("SELECT COUNT(b) FROM Bench b WHERE b.nodeId = :nodeId")
     long countByNodeId(Long nodeId);

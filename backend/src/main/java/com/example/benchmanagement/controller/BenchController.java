@@ -21,8 +21,10 @@ public class BenchController {
     private final BenchService benchService;
 
     @GetMapping
-    public ResponseEntity<ApiResponse<List<BenchDTO>>> getAllBenches() {
-        List<BenchDTO> benches = benchService.getAllBenches();
+    public ResponseEntity<ApiResponse<List<BenchDTO>>> getAllBenches(
+            @RequestParam(value = "inspectionResult", required = false) Integer inspectionResult,
+            @RequestParam(value = "severity", required = false) Integer severity) {
+        List<BenchDTO> benches = benchService.getAllBenches(inspectionResult, severity);
         return ResponseEntity.ok(ApiResponse.success(benches));
     }
 

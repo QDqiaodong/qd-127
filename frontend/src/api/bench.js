@@ -1,6 +1,6 @@
 import request from './request'
 
-export const getAllBenches = () => request.get('/bench')
+export const getAllBenches = (params) => request.get('/bench', { params })
 export const getBenchById = (id) => request.get(`/bench/${id}`)
 export const getBenchesByNode = (nodeId) => request.get(`/bench/node/${nodeId}`)
 export const createBench = (data) => request.post('/bench', data)

@@ -160,7 +160,7 @@
 
     <!-- ============ 发起巡检弹窗 ============ -->
     <el-dialog v-model="createDialogVisible" title="发起巡检" width="900px" @closed="resetCreateForm">
-      <el-form :model="createForm" label-width="100px">
+      <el-form :model="createForm" label-width="100px" v-loading="scopeLoading" element-loading-text="正在加载范围内长凳...">
         <el-row :gutter="10">
           <el-col :span="8">
             <el-form-item label="巡检街区">
@@ -184,7 +184,6 @@
                 :disabled="!createForm.sectionId"
                 clearable
                 @change="onPointChange"
-                @clear="onPointChange"
               >
                 <el-option v-for="p in createPoints" :key="p.id" :value="p.id" :label="p.name" />
               </el-select>
@@ -414,6 +413,9 @@ const createPoints = ref([])
 const scopeBenches = ref([])
 const inspectionItems = ref([])
 const defaultInspectedAt = ref('')
+const scopeLoading = ref(false)
+// 范围加载序号：快速切换范围时丢弃过期响应，避免旧范围数据覆盖新范围
+let scopeLoadSeq = 0
 
 // 完成维修
 const completeDialogVisible = ref(false)
@@ -468,14 +470,17 @@ const onPointChange = () => {
 }
 const loadScopeBenches = async () => {
   const nodeId = currentScopeNodeId.value
+  const seq = ++scopeLoadSeq
   if (!nodeId) {
     scopeBenches.value = []
     inspectionItems.value = []
     scopeResolved.value = false
     return
   }
+  scopeLoading.value = true
   try {
-    const list = await getBenches(nodeId)
+    const list = await getBenchesByNode(nodeId)
+    if (seq !== scopeLoadSeq) return
     scopeBenches.value = list
     inspectionItems.value = list.map(b => ({
       benchId: b.id,
@@ -491,7 +496,14 @@ const loadScopeBenches = async () => {
     }))
     scopeResolved.value = true
   } catch (e) {
-    ElMessage.error(e.message || '加载范围内长凳失败')
+    if (seq !== scopeLoadSeq) return
+    // 取数失败时清空旧范围数据，避免误提交到其他范围
+    scopeBenches.value = []
+    inspectionItems.value = []
+    scopeResolved.value = false
+    ElMessage.error(e.message || '加载范围内长凳失败，请重新选择范围')
+  } finally {
+    if (seq === scopeLoadSeq) scopeLoading.value = false
   }
 }
 
@@ -514,6 +526,8 @@ const openCreateDialog = () => {
 }
 
 const resetCreateForm = () => {
+  scopeLoadSeq++
+  scopeLoading.value = false
   createForm.value = { districtId: null, sectionId: null, nodeId: null, inspector: '' }
   createSections.value = []
   createPoints.value = []

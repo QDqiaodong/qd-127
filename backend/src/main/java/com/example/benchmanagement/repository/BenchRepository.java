@@ -21,6 +21,9 @@ public interface BenchRepository extends JpaRepository<Bench, Long> {
     @Query("SELECT COUNT(b) FROM Bench b WHERE b.nodeId = :nodeId")
     long countByNodeId(Long nodeId);
 
+    @Query("SELECT b.nodeId AS nodeId, COUNT(b) AS cnt FROM Bench b WHERE b.nodeId IN :nodeIds GROUP BY b.nodeId")
+    List<Object[]> countByNodeIds(@org.springframework.data.repository.query.Param("nodeIds") List<Long> nodeIds);
+
     @Query("SELECT b FROM Bench b WHERE b.material LIKE %:keyword% OR b.code LIKE %:keyword%")
     List<Bench> searchByKeyword(String keyword);
 

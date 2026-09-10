@@ -27,6 +27,21 @@ public class TreeNodeDTO {
 
     private Integer sortOrder;
 
+    /** 可摆放长凳上限（仅点位 level=3 有效） */
+    private Integer capacity;
+
+    /** 当前占用数（仅点位 level=3 有效） */
+    private Long occupiedCount;
+
+    /** 剩余可摆放数（仅点位 level=3 有效） */
+    private Long remainingCount;
+
+    /** 容量最近调整时间 */
+    private java.time.LocalDateTime capacityUpdatedAt;
+
+    /** 容量最近调整原因 */
+    private String capacityUpdatedReason;
+
     private List<TreeNodeDTO> children;
 
     private String path;

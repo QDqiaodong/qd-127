@@ -6,6 +6,9 @@ CREATE TABLE IF NOT EXISTS tree_node (
     level INT NOT NULL COMMENT '1=街区, 2=路段, 3=点位',
     name VARCHAR(100) NOT NULL,
     sort_order INT DEFAULT 0,
+    capacity INT DEFAULT NULL COMMENT '可摆放长凳上限(仅level=3点位)',
+    capacity_updated_at TIMESTAMP NULL DEFAULT NULL COMMENT '容量最近调整时间',
+    capacity_updated_reason VARCHAR(500) DEFAULT NULL COMMENT '容量最近调整原因',
     is_deleted TINYINT DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -46,23 +49,47 @@ CREATE TABLE IF NOT EXISTS bench_change_log (
     CONSTRAINT fk_log_new_node FOREIGN KEY (new_node_id) REFERENCES tree_node(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='长凳分类变更日志表';
 
-INSERT INTO tree_node (parent_id, level, name, sort_order) VALUES
-(NULL, 1, '商业步行街A区', 1),
-(NULL, 1, '商业步行街B区', 2),
-(1, 2, 'A区主干道', 1),
-(1, 2, 'A区支路一', 2),
-(1, 2, 'A区支路二', 3),
-(2, 2, 'B区主干道', 1),
-(2, 2, 'B区支路', 2),
-(3, 3, 'A区主干道-广场前', 1),
-(3, 3, 'A区主干道-商店旁', 2),
-(3, 3, 'A区主干道-路口处', 3),
-(4, 3, 'A区支路一-公园边', 1),
-(4, 3, 'A区支路一-居民区', 2),
-(5, 3, 'A区支路二-学校旁', 1),
-(6, 3, 'B区主干道-地铁站口', 1),
-(6, 3, 'B区主干道-商场前', 2),
-(7, 3, 'B区支路-小区门口', 1);
+CREATE TABLE IF NOT EXISTS node_capacity_log (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    node_id BIGINT NOT NULL COMMENT '点位ID(level=3)',
+    old_capacity INT DEFAULT NULL COMMENT '调整前容量(NULL表示新建初始化)',
+    new_capacity INT NOT NULL COMMENT '调整后容量',
+    occupied_count INT DEFAULT 0 COMMENT '调整时占用数',
+    adjust_reason VARCHAR(500) COMMENT '调整原因',
+    adjusted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '调整时间',
+    adjusted_by VARCHAR(50) DEFAULT 'system',
+    INDEX idx_node_id (node_id),
+    INDEX idx_adjusted_at (adjusted_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='点位容量调整记录表';
+
+INSERT INTO tree_node (parent_id, level, name, sort_order, capacity) VALUES
+(NULL, 1, '商业步行街A区', 1, NULL),
+(NULL, 1, '商业步行街B区', 2, NULL),
+(1, 2, 'A区主干道', 1, NULL),
+(1, 2, 'A区支路一', 2, NULL),
+(1, 2, 'A区支路二', 3, NULL),
+(2, 2, 'B区主干道', 1, NULL),
+(2, 2, 'B区支路', 2, NULL),
+(3, 3, 'A区主干道-广场前', 1, 2),
+(3, 3, 'A区主干道-商店旁', 2, 10),
+(3, 3, 'A区主干道-路口处', 3, 5),
+(4, 3, 'A区支路一-公园边', 1, 3),
+(4, 3, 'A区支路一-居民区', 2, 5),
+(5, 3, 'A区支路二-学校旁', 1, 8),
+(6, 3, 'B区主干道-地铁站口', 1, 10),
+(6, 3, 'B区主干道-商场前', 2, 6),
+(7, 3, 'B区支路-小区门口', 1, 10);
+
+INSERT INTO node_capacity_log (node_id, old_capacity, new_capacity, occupied_count, adjust_reason, adjusted_by) VALUES
+(8, NULL, 2, 0, '新建点位，初始化容量', 'system'),
+(9, NULL, 10, 0, '新建点位，初始化容量', 'system'),
+(10, NULL, 5, 0, '新建点位，初始化容量', 'system'),
+(11, NULL, 3, 0, '新建点位，初始化容量', 'system'),
+(12, NULL, 5, 0, '新建点位，初始化容量', 'system'),
+(13, NULL, 8, 0, '新建点位，初始化容量', 'system'),
+(14, NULL, 10, 0, '新建点位，初始化容量', 'system'),
+(15, NULL, 6, 0, '新建点位，初始化容量', 'system'),
+(16, NULL, 10, 0, '新建点位，初始化容量', 'system');
 
 INSERT INTO bench (code, material, length, width, height, node_id, specs_json, status) VALUES
 ('BNCH-A001', '实木', 150.00, 50.00, 45.00, 8, '{"seatCount":2,"weight":35,"capacity":200}', 1),

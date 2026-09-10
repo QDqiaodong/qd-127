@@ -1,6 +1,8 @@
 package com.example.benchmanagement.controller;
 
 import com.example.benchmanagement.dto.ApiResponse;
+import com.example.benchmanagement.dto.CapacityAdjustRequest;
+import com.example.benchmanagement.dto.NodeCapacityLogDTO;
 import com.example.benchmanagement.dto.TreeNodeDTO;
 import com.example.benchmanagement.service.TreeNodeService;
 import jakarta.validation.Valid;
@@ -51,6 +53,19 @@ public class TreeNodeController {
     public ResponseEntity<ApiResponse<TreeNodeDTO>> updateNode(@PathVariable Long id, @RequestBody TreeNodeDTO dto) {
         TreeNodeDTO updated = treeNodeService.updateNode(id, dto);
         return ResponseEntity.ok(ApiResponse.success("更新成功", updated));
+    }
+
+    @PutMapping("/{id}/capacity")
+    public ResponseEntity<ApiResponse<TreeNodeDTO>> adjustCapacity(@PathVariable Long id,
+                                                                   @Valid @RequestBody CapacityAdjustRequest request) {
+        TreeNodeDTO updated = treeNodeService.adjustCapacity(id, request);
+        return ResponseEntity.ok(ApiResponse.success("容量调整成功", updated));
+    }
+
+    @GetMapping("/{id}/capacity-logs")
+    public ResponseEntity<ApiResponse<List<NodeCapacityLogDTO>>> getCapacityLogs(@PathVariable Long id) {
+        List<NodeCapacityLogDTO> logs = treeNodeService.getCapacityLogs(id);
+        return ResponseEntity.ok(ApiResponse.success(logs));
     }
 
     @DeleteMapping("/{id}")

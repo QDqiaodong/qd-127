@@ -32,6 +32,15 @@ public class TreeNode {
     @Column(name = "sort_order")
     private Integer sortOrder;
 
+    @Column(name = "capacity")
+    private Integer capacity;
+
+    @Column(name = "capacity_updated_at")
+    private LocalDateTime capacityUpdatedAt;
+
+    @Column(name = "capacity_updated_reason")
+    private String capacityUpdatedReason;
+
     @Column(name = "is_deleted")
     private Boolean isDeleted;
 
@@ -40,6 +49,8 @@ public class TreeNode {
 
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
+
+    public static final int DEFAULT_CAPACITY = 10;
 
     @PrePersist
     public void prePersist() {

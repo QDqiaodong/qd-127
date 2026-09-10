@@ -40,4 +40,7 @@ public class BenchDTO {
     private String districtName;
 
     private String sectionName;
+
+    /** 归属点位变更原因（仅编辑长凳并调整点位时使用） */
+    private String changeReason;
 }

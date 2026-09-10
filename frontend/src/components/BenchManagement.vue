@@ -22,7 +22,12 @@
         </el-select>
         <el-select v-model="filterPoint" placeholder="选择点位" class="filter-item" :disabled="!filterSection">
           <el-option label="全部" :value="null" />
-          <el-option v-for="p in points" :key="p.id" :value="p.id" :label="p.name" />
+          <el-option
+            v-for="p in points"
+            :key="p.id"
+            :value="p.id"
+            :label="pointOptionLabel(p)"
+          />
         </el-select>
         <el-input v-model="searchKeyword" placeholder="搜索编号/材质" class="filter-item" @keyup.enter="handleSearch" />
         <el-button @click="handleSearch">
@@ -42,6 +47,15 @@
         <el-table-column prop="districtName" label="所属街区" />
         <el-table-column prop="sectionName" label="所属路段" />
         <el-table-column prop="nodeName" label="所属点位" />
+        <el-table-column label="点位容量" width="130">
+          <template #default="{ row }">
+            <el-tag size="small" :type="capacityTagType(pointInfoMap[row.nodeId])" effect="plain">
+              {{ pointInfoMap[row.nodeId]
+                ? `${pointInfoMap[row.nodeId].occupiedCount}/${pointInfoMap[row.nodeId].capacity}`
+                : '-' }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="status" label="状态">
           <template #default="{ row }">
             <el-tag :type="row.status === 1 ? 'success' : 'danger'">
@@ -101,8 +115,30 @@
         </el-form-item>
         <el-form-item label="所属点位">
           <el-select v-model="form.nodeId" placeholder="请选择点位" :disabled="!form.sectionId">
-            <el-option v-for="p in formPoints" :key="p.id" :value="p.id" :label="p.name" />
+            <el-option
+              v-for="p in formPoints"
+              :key="p.id"
+              :value="p.id"
+              :label="pointOptionLabel(p)"
+            />
           </el-select>
+          <el-tag
+            v-if="selectedFormPoint"
+            size="small"
+            :type="capacityTagType(selectedFormPoint)"
+            effect="plain"
+            class="capacity-hint"
+          >
+            上限{{ selectedFormPoint.capacity }}，已摆{{ selectedFormPoint.occupiedCount }}，剩余{{ selectedFormPoint.remainingCount }}
+          </el-tag>
+        </el-form-item>
+        <el-form-item v-if="isEdit && form.nodeId && form.nodeId !== originalNodeId" label="变更原因">
+          <el-input
+            v-model="form.changeReason"
+            type="textarea"
+            :rows="2"
+            placeholder="点位归属发生变化，请填写变更原因，将记录到变更台账"
+          />
         </el-form-item>
         <el-form-item label="状态">
           <el-radio-group v-model="form.status">
@@ -131,8 +167,25 @@
         </el-form-item>
         <el-form-item label="目标点位">
           <el-select v-model="batchForm.newNodeId" placeholder="请选择点位" :disabled="!batchForm.sectionId">
-            <el-option v-for="p in batchPoints" :key="p.id" :value="p.id" :label="p.name" />
+            <el-option
+              v-for="p in batchPoints"
+              :key="p.id"
+              :value="p.id"
+              :label="pointOptionLabel(p)"
+            />
           </el-select>
+          <el-tag
+            v-if="selectedBatchPoint"
+            size="small"
+            :type="capacityTagType(selectedBatchPoint)"
+            effect="plain"
+            class="capacity-hint"
+          >
+            上限{{ selectedBatchPoint.capacity }}，已摆{{ selectedBatchPoint.occupiedCount }}，剩余{{ selectedBatchPoint.remainingCount }}
+            <span v-if="batchIncomingCount > selectedBatchPoint.remainingCount" class="capacity-warn">
+              ，本次移入{{ batchIncomingCount }}张，容量不足
+            </span>
+          </el-tag>
         </el-form-item>
         <el-form-item label="变更原因">
           <el-input v-model="batchForm.changeReason" type="textarea" placeholder="请输入变更原因" />
@@ -157,7 +210,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { Plus, Search, Edit, Delete } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getAllBenches, getBenchById, createBench, updateBench, deleteBench, changeBenchNode, getChangeLogs, getBenchesByNode } from '../api/bench'
@@ -177,6 +230,7 @@ const selectedBenches = ref([])
 
 const dialogVisible = ref(false)
 const isEdit = ref(false)
+const originalNodeId = ref(null)
 const form = ref({
   id: null,
   code: '',
@@ -187,6 +241,7 @@ const form = ref({
   nodeId: null,
   districtId: null,
   sectionId: null,
+  changeReason: '',
   status: 1
 })
 
@@ -207,6 +262,34 @@ const batchPoints = ref([])
 const logDialogVisible = ref(false)
 const changeLogs = ref([])
 
+const sectionMap = ref({})
+const pointMap = ref({})
+const pointInfoMap = ref({})
+
+const capacityTagType = (point) => {
+  if (!point || point.remainingCount === undefined || point.remainingCount === null) return 'info'
+  if (point.remainingCount === 0) return 'danger'
+  if (point.remainingCount <= 2) return 'warning'
+  return 'success'
+}
+
+const pointOptionLabel = (p) =>
+  p && p.capacity !== undefined && p.capacity !== null
+    ? `${p.name}（已摆${p.occupiedCount ?? 0}/${p.capacity}，余${p.remainingCount ?? 0}）`
+    : p.name
+
+const selectedFormPoint = computed(() =>
+  form.value.nodeId ? pointInfoMap.value[form.value.nodeId] : null
+)
+
+const selectedBatchPoint = computed(() =>
+  batchForm.value.newNodeId ? pointInfoMap.value[batchForm.value.newNodeId] : null
+)
+
+const batchIncomingCount = computed(() =>
+  selectedBenches.value.filter(b => b.nodeId !== batchForm.value.newNodeId).length
+)
+
 const loadBenches = async () => {
   try {
     benchList.value = await getAllBenches()
@@ -225,12 +308,10 @@ const loadTreeData = async () => {
   }
 }
 
-const sectionMap = ref({})
-const pointMap = ref({})
-
 const buildSectionMap = (tree) => {
   const sm = {}
   const pm = {}
+  const pim = {}
   tree.forEach(district => {
     if (district.children) {
       district.children.forEach(section => {
@@ -240,6 +321,7 @@ const buildSectionMap = (tree) => {
           section.children.forEach(point => {
             pm[section.id] = pm[section.id] || []
             pm[section.id].push(point)
+            pim[point.id] = point
           })
         }
       })
@@ -247,6 +329,7 @@ const buildSectionMap = (tree) => {
   })
   sectionMap.value = sm
   pointMap.value = pm
+  pointInfoMap.value = pim
 }
 
 const handleDistrictChange = () => {
@@ -301,6 +384,7 @@ const handleReset = () => {
 
 const handleAdd = () => {
   isEdit.value = false
+  originalNodeId.value = null
   form.value = {
     id: null,
     code: '',
@@ -311,6 +395,7 @@ const handleAdd = () => {
     nodeId: null,
     districtId: null,
     sectionId: null,
+    changeReason: '',
     status: 1
   }
   formSections.value = []
@@ -332,8 +417,10 @@ const handleEdit = async (row) => {
       nodeId: bench.nodeId,
       districtId: null,
       sectionId: null,
+      changeReason: '',
       status: bench.status
     }
+    originalNodeId.value = bench.nodeId
     await loadFormNodeInfo(bench.nodeId)
     dialogVisible.value = true
   } catch (error) {
@@ -384,6 +471,16 @@ const handleSubmit = async () => {
     return
   }
 
+  const targetPoint = pointInfoMap.value[form.value.nodeId]
+  const nodeChanged = isEdit.value && form.value.nodeId !== originalNodeId.value
+  if (targetPoint) {
+    const needSlots = isEdit.value ? (nodeChanged ? 1 : 0) : 1
+    if (needSlots > 0 && targetPoint.remainingCount < needSlots) {
+      ElMessage.warning(`点位【${targetPoint.name}】容量已满（已摆${targetPoint.occupiedCount}/${targetPoint.capacity}），请先调整该点位容量或选择其他点位`)
+      return
+    }
+  }
+
   try {
     const data = {
       code: form.value.code,
@@ -394,6 +491,9 @@ const handleSubmit = async () => {
       nodeId: form.value.nodeId,
       status: form.value.status
     }
+    if (nodeChanged) {
+      data.changeReason = form.value.changeReason
+    }
 
     if (isEdit.value) {
       await updateBench(form.value.id, data)
@@ -403,7 +503,7 @@ const handleSubmit = async () => {
       ElMessage.success('创建成功')
     }
     dialogVisible.value = false
-    loadBenches()
+    await Promise.all([loadBenches(), loadTreeData()])
   } catch (error) {
     ElMessage.error(error.message || '操作失败')
   }
@@ -418,7 +518,7 @@ const handleDelete = async (row) => {
     })
     await deleteBench(row.id)
     ElMessage.success('删除成功')
-    loadBenches()
+    await Promise.all([loadBenches(), loadTreeData()])
   } catch (error) {
     if (error !== 'cancel') {
       ElMessage.error(error.message || '删除失败')
@@ -460,6 +560,15 @@ const handleBatchSubmit = async () => {
     return
   }
 
+  const targetPoint = pointInfoMap.value[batchForm.value.newNodeId]
+  const incomingCount = selectedBenches.value.filter(b => b.nodeId !== batchForm.value.newNodeId).length
+  if (targetPoint && incomingCount > targetPoint.remainingCount) {
+    ElMessage.warning(
+      `点位【${targetPoint.name}】容量不足：上限${targetPoint.capacity}张，已摆${targetPoint.occupiedCount}张，剩余${targetPoint.remainingCount}个空位，本次需移入${incomingCount}张，请先扩容或减少选择数量`
+    )
+    return
+  }
+
   try {
     const benchIds = selectedBenches.value.map(b => b.id)
     await changeBenchNode({
@@ -470,7 +579,7 @@ const handleBatchSubmit = async () => {
     ElMessage.success('批量变更成功')
     batchDialogVisible.value = false
     selectedBenches.value = []
-    loadBenches()
+    await Promise.all([loadBenches(), loadTreeData()])
   } catch (error) {
     ElMessage.error(error.message || '批量变更失败')
   }
@@ -530,5 +639,14 @@ onMounted(() => {
 
 .batch-action span {
   color: #606266;
+}
+
+.capacity-hint {
+  margin-left: 10px;
+}
+
+.capacity-warn {
+  color: #f56c6c;
+  font-weight: 600;
 }
 </style>

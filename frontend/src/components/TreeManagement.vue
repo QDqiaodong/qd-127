@@ -30,6 +30,17 @@
               <span class="node-level">
                 {{ data.level === 1 ? '街区' : data.level === 2 ? '路段' : '点位' }}
               </span>
+              <el-tag
+                v-if="data.level === 3"
+                size="small"
+                :type="capacityTagType(data)"
+                class="capacity-tag"
+                effect="plain"
+              >
+                容量 {{ data.occupiedCount ?? 0 }}/{{ data.capacity }}
+                <span v-if="data.remainingCount === 0" class="capacity-full">已满</span>
+                <span v-else>余{{ data.remainingCount }}</span>
+              </el-tag>
             </span>
           </template>
         </el-tree>
@@ -48,13 +59,13 @@
       </el-pagination>
     </el-card>
 
-    <el-dialog v-model="dialogVisible" :title="isEdit ? '编辑节点' : '添加节点'" width="400px">
-      <el-form :model="form" label-width="80px">
+    <el-dialog v-model="dialogVisible" :title="isEdit ? '编辑节点' : '添加节点'" width="460px">
+      <el-form :model="form" label-width="90px">
         <el-form-item label="节点名称" prop="name">
           <el-input v-model="form.name" placeholder="请输入节点名称" />
         </el-form-item>
         <el-form-item v-if="!isEdit" label="上级节点">
-          <el-select v-model="form.parentId" placeholder="请选择上级节点">
+          <el-select v-model="form.parentId" placeholder="请选择上级节点" @change="handleParentChange">
             <el-option :value="null" label="无（创建街区）" />
             <el-option
               v-for="node in parentOptions"
@@ -67,11 +78,54 @@
         <el-form-item label="排序号">
           <el-input-number v-model="form.sortOrder" :min="0" />
         </el-form-item>
+        <el-form-item v-if="!isEdit && formLevel === 3" label="长凳容量">
+          <el-input-number v-model="form.capacity" :min="0" />
+          <span class="form-tip">该点位最多可摆放的长凳数量（默认10）</span>
+        </el-form-item>
+        <template v-if="isEdit && editingPoint">
+          <el-form-item label="当前容量状态">
+            <el-tag size="small" :type="capacityTagType(editingPoint)" effect="plain">
+              已摆 {{ editingPoint.occupiedCount ?? 0 }} / 上限 {{ editingPoint.capacity }}
+              ，剩余 {{ editingPoint.remainingCount ?? 0 }}
+            </el-tag>
+          </el-form-item>
+          <el-form-item label="新容量">
+            <el-input-number v-model="form.capacity" :min="0" />
+          </el-form-item>
+          <el-form-item label="调整原因">
+            <el-input
+              v-model="form.adjustReason"
+              type="textarea"
+              :rows="2"
+              placeholder="修改容量时必填，将记录到容量调整台账"
+            />
+          </el-form-item>
+          <el-form-item v-if="editingPoint.capacityUpdatedAt" label="最近调整">
+            <span class="form-tip">
+              {{ editingPoint.capacityUpdatedAt }}
+              {{ editingPoint.capacityUpdatedReason ? '｜' + editingPoint.capacityUpdatedReason : '' }}
+            </span>
+          </el-form-item>
+        </template>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" @click="handleSubmit">确定</el-button>
       </template>
+    </el-dialog>
+
+    <el-dialog v-model="capacityLogVisible" :title="`容量调整记录 - ${capacityLogNodeName}`" width="640px">
+      <el-table :data="capacityLogs" border size="small">
+        <el-table-column prop="adjustedAt" label="调整时间" width="170" />
+        <el-table-column label="容量变化" width="110">
+          <template #default="{ row }">
+            {{ row.oldCapacity === null ? '—' : row.oldCapacity }} → {{ row.newCapacity }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="occupiedCount" label="调整时占用" width="100" />
+        <el-table-column prop="adjustReason" label="调整原因" />
+        <el-table-column prop="adjustedBy" label="操作人" width="90" />
+      </el-table>
     </el-dialog>
 
     <el-menu
@@ -83,6 +137,10 @@
       <el-menu-item @click="handleEdit">
         <el-icon><Edit /></el-icon>
         编辑
+      </el-menu-item>
+      <el-menu-item v-if="rightClickedNode && rightClickedNode.level === 3" @click="handleCapacityLogs">
+        <el-icon><Tickets /></el-icon>
+        容量调整记录
       </el-menu-item>
       <el-menu-item @click="handleDelete" style="color: #f56c6c">
         <el-icon><Delete /></el-icon>
@@ -101,9 +159,9 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { Plus, Edit, Delete, Download, Location, Grid, CirclePlus } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, Download, Location, Grid, CirclePlus, Tickets } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getTree, createNode, updateNode, deleteNode, getChildren } from '../api/tree'
+import { getTree, createNode, updateNode, deleteNode, adjustCapacity, getCapacityLogs } from '../api/tree'
 import { getBenchesByNode, exportAssets } from '../api/bench'
 
 const treeData = ref([])
@@ -119,7 +177,9 @@ const form = ref({
   name: '',
   parentId: null,
   level: 1,
-  sortOrder: 0
+  sortOrder: 0,
+  capacity: 10,
+  adjustReason: ''
 })
 
 const selectedNode = ref(null)
@@ -127,6 +187,28 @@ const menuVisible = ref(false)
 const menuPosition = ref({ x: 0, y: 0 })
 const rightClickedNode = ref(null)
 const sectionBenchCount = ref(0)
+
+const capacityLogVisible = ref(false)
+const capacityLogs = ref([])
+const capacityLogNodeName = ref('')
+
+const formLevel = computed(() => {
+  if (isEdit.value) {
+    return form.value.level
+  }
+  return form.value.parentId ? getParentLevel(form.value.parentId) + 1 : 1
+})
+
+const editingPoint = computed(() =>
+  isEdit.value && form.value.level === 3 ? rightClickedNode.value : null
+)
+
+const capacityTagType = (point) => {
+  if (!point || point.remainingCount === undefined || point.remainingCount === null) return 'info'
+  if (point.remainingCount === 0) return 'danger'
+  if (point.remainingCount <= 2) return 'warning'
+  return 'success'
+}
 
 const parentOptions = computed(() => {
   const options = []
@@ -148,7 +230,7 @@ const loadTree = async () => {
   try {
     treeData.value = await getTree()
   } catch (error) {
-    ElMessage.error('加载树形数据失败')
+    ElMessage.error(error.message || '加载树形数据失败')
   }
 }
 
@@ -175,9 +257,18 @@ const handleAdd = () => {
     name: '',
     parentId: null,
     level: 1,
-    sortOrder: 0
+    sortOrder: 0,
+    capacity: 10,
+    adjustReason: ''
   }
   dialogVisible.value = true
+}
+
+const handleParentChange = () => {
+  form.value.level = form.value.parentId ? getParentLevel(form.value.parentId) + 1 : 1
+  if (form.value.level === 3 && form.value.capacity === null) {
+    form.value.capacity = 10
+  }
 }
 
 const handleEdit = () => {
@@ -188,10 +279,25 @@ const handleEdit = () => {
     name: rightClickedNode.value.name,
     parentId: rightClickedNode.value.parentId,
     level: rightClickedNode.value.level,
-    sortOrder: rightClickedNode.value.sortOrder || 0
+    sortOrder: rightClickedNode.value.sortOrder || 0,
+    capacity: rightClickedNode.value.capacity ?? 10,
+    adjustReason: ''
   }
   menuVisible.value = false
   dialogVisible.value = true
+}
+
+const handleCapacityLogs = async () => {
+  if (!rightClickedNode.value || rightClickedNode.value.level !== 3) return
+  const node = rightClickedNode.value
+  menuVisible.value = false
+  try {
+    capacityLogNodeName.value = node.name
+    capacityLogs.value = await getCapacityLogs(node.id)
+    capacityLogVisible.value = true
+  } catch (error) {
+    ElMessage.error(error.message || '加载容量调整记录失败')
+  }
 }
 
 const handleDelete = async () => {
@@ -226,15 +332,39 @@ const handleSubmit = async () => {
         name: form.value.name,
         sortOrder: form.value.sortOrder
       })
-      ElMessage.success('更新成功')
+
+      if (form.value.level === 3) {
+        const point = rightClickedNode.value
+        const newCapacity = form.value.capacity
+        const oldCapacity = point.capacity ?? 10
+        if (newCapacity !== oldCapacity) {
+          if (!form.value.adjustReason || !form.value.adjustReason.trim()) {
+            ElMessage.warning('调整容量必须填写调整原因')
+            return
+          }
+          await adjustCapacity(form.value.id, {
+            capacity: newCapacity,
+            adjustReason: form.value.adjustReason.trim()
+          })
+          ElMessage.success('节点更新成功，容量已调整')
+        } else {
+          ElMessage.success('更新成功')
+        }
+      } else {
+        ElMessage.success('更新成功')
+      }
     } else {
-      const level = form.value.parentId ? getParentLevel(form.value.parentId) + 1 : 1
-      await createNode({
+      const level = formLevel.value
+      const payload = {
         name: form.value.name,
         parentId: form.value.parentId,
         level,
         sortOrder: form.value.sortOrder
-      })
+      }
+      if (level === 3) {
+        payload.capacity = form.value.capacity
+      }
+      await createNode(payload)
       ElMessage.success('创建成功')
     }
     dialogVisible.value = false
@@ -309,7 +439,7 @@ const convertToCSV = (data) => {
 }
 
 const downloadCSV = (content, filename) => {
-  const blob = new Blob([`\uFEFF${content}`], { type: 'text/csv;charset=utf-8;' })
+  const blob = new Blob(['\uFEFF', content], { type: 'text/csv;charset=utf-8;' })
   const link = document.createElement('a')
   link.href = URL.createObjectURL(blob)
   link.download = filename
@@ -350,6 +480,22 @@ onMounted(() => {
   font-size: 12px;
   color: #909399;
   margin-left: 8px;
+}
+
+.capacity-tag {
+  margin-left: 4px;
+}
+
+.capacity-full {
+  color: #f56c6c;
+  margin-left: 4px;
+  font-weight: 600;
+}
+
+.form-tip {
+  margin-left: 10px;
+  font-size: 12px;
+  color: #909399;
 }
 
 .context-menu {

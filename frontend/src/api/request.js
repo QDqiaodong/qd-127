@@ -15,7 +15,11 @@ request.interceptors.response.use(
     }
   },
   error => {
-    return Promise.reject(error)
+    const res = error.response && error.response.data
+    if (res && res.message) {
+      return Promise.reject(new Error(res.message))
+    }
+    return Promise.reject(new Error(error.message || '网络异常，请稍后重试'))
   }
 )
 

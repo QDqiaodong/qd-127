@@ -71,11 +71,13 @@ public class BenchService {
 
     @Transactional
     public BenchDTO createBench(BenchDTO dto) {
-        validateNodeLevel3(dto.getNodeId());
+        TreeNode point = validateNodeLevel3(dto.getNodeId());
 
         if (benchRepository.existsByCode(dto.getCode())) {
             throw new IllegalArgumentException("长凳编号已存在");
         }
+
+        assertCapacityAvailable(point, 1);
 
         Bench bench = Bench.builder()
                 .code(dto.getCode())
@@ -125,6 +127,24 @@ public class BenchService {
             bench.setSpecsJson(dto.getSpecsJson());
         }
 
+        if (dto.getNodeId() != null && !dto.getNodeId().equals(bench.getNodeId())) {
+            TreeNode targetPoint = validateNodeLevel3(dto.getNodeId());
+            assertCapacityAvailable(targetPoint, 1);
+
+            Long oldNodeId = bench.getNodeId();
+            bench.setNodeId(dto.getNodeId());
+
+            BenchChangeLog logEntry = BenchChangeLog.builder()
+                    .benchId(id)
+                    .oldNodeId(oldNodeId)
+                    .newNodeId(dto.getNodeId())
+                    .changeReason(dto.getChangeReason())
+                    .changedBy("system")
+                    .build();
+            changeLogRepository.save(logEntry);
+            log.info("单条变更长凳点位: benchId={}, oldNodeId={}, newNodeId={}", id, oldNodeId, dto.getNodeId());
+        }
+
         Bench saved = benchRepository.save(bench);
         cacheBenchSpecs(saved);
         log.info("更新长凳: id={}, code={}", saved.getId(), saved.getCode());
@@ -143,20 +163,38 @@ public class BenchService {
 
     @Transactional
     public List<BenchDTO> changeBenchNode(BenchChangeRequest request) {
-        validateNodeLevel3(request.getNewNodeId());
+        TreeNode targetPoint = validateNodeLevel3(request.getNewNodeId());
 
-        List<BenchDTO> results = new ArrayList<>();
+        if (request.getBenchIds() == null || request.getBenchIds().isEmpty()) {
+            throw new IllegalArgumentException("长凳ID列表不能为空");
+        }
+
+        List<Bench> benches = new ArrayList<>();
         for (Long benchId : request.getBenchIds()) {
             Bench bench = benchRepository.findById(benchId)
                     .orElseThrow(() -> new IllegalArgumentException("长凳不存在: " + benchId));
+            benches.add(bench);
+        }
 
+        // 已在目标点位上的长凳不重复占用容量
+        List<Long> excludeBenchIds = benches.stream()
+                .filter(b -> b.getNodeId().equals(request.getNewNodeId()))
+                .map(Bench::getId)
+                .toList();
+        long incomingCount = benches.size() - excludeBenchIds.size();
+        if (incomingCount > 0) {
+            assertCapacityAvailable(targetPoint, incomingCount);
+        }
+
+        List<BenchDTO> results = new ArrayList<>();
+        for (Bench bench : benches) {
             if (!bench.getNodeId().equals(request.getNewNodeId())) {
                 Long oldNodeId = bench.getNodeId();
                 bench.setNodeId(request.getNewNodeId());
                 benchRepository.save(bench);
 
                 BenchChangeLog logEntry = BenchChangeLog.builder()
-                        .benchId(benchId)
+                        .benchId(bench.getId())
                         .oldNodeId(oldNodeId)
                         .newNodeId(request.getNewNodeId())
                         .changeReason(request.getChangeReason())
@@ -166,7 +204,9 @@ public class BenchService {
 
                 cacheBenchSpecs(bench);
                 results.add(toDTO(bench));
-                log.info("变更长凳点位: benchId={}, oldNodeId={}, newNodeId={}", benchId, oldNodeId, request.getNewNodeId());
+                log.info("变更长凳点位: benchId={}, oldNodeId={}, newNodeId={}", bench.getId(), oldNodeId, request.getNewNodeId());
+            } else {
+                results.add(toDTO(bench));
             }
         }
         return results;
@@ -217,11 +257,29 @@ public class BenchService {
         return assets;
     }
 
-    private void validateNodeLevel3(Long nodeId) {
+    private TreeNode validateNodeLevel3(Long nodeId) {
         TreeNode node = treeNodeRepository.findByIdAndIsDeletedFalse(nodeId)
                 .orElseThrow(() -> new IllegalArgumentException("点位不存在"));
         if (node.getLevel() != 3) {
             throw new IllegalArgumentException("长凳只能绑定到点位(level=3)");
+        }
+        return node;
+    }
+
+    /**
+     * 校验目标点位是否还有足够容量摆放 incoming 张长凳。
+     *
+     * @param point            目标点位
+     * @param incoming         本次拟新增（含变更进入）的长凳数量
+     */
+    private void assertCapacityAvailable(TreeNode point, long incoming) {
+        int capacity = point.getCapacity() != null ? point.getCapacity() : TreeNode.DEFAULT_CAPACITY;
+        long occupied = benchRepository.countByNodeId(point.getId());
+        long available = capacity - occupied;
+        if (occupied + incoming > capacity) {
+            throw new IllegalArgumentException(String.format(
+                    "点位【%s】容量不足：容量上限%d张，当前已摆放%d张，剩余%d个空位，本次需占用%d个，操作已阻止",
+                    point.getName(), capacity, occupied, Math.max(0, available), incoming));
         }
     }
 

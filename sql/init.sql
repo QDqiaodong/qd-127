@@ -31,12 +31,40 @@ CREATE TABLE IF NOT EXISTS bench (
     node_id BIGINT NOT NULL COMMENT '所属点位ID(level=3)',
     specs_json TEXT COMMENT '规格参数JSON',
     status TINYINT DEFAULT 1 COMMENT '状态：1-正常，0-停用',
+    retired TINYINT DEFAULT 0 COMMENT '退役状态：1-已退役(报废)，0-在用',
+    retirement_id BIGINT DEFAULT NULL COMMENT '退役记录ID',
+    retired_reason VARCHAR(500) COMMENT '报废退役原因',
+    retired_at DATETIME NULL COMMENT '退役时间',
+    retired_by VARCHAR(50) COMMENT '退役经办人',
+    replaced_by_bench_id BIGINT DEFAULT NULL COMMENT '替换新凳ID(原点位登记的替换长凳)',
+    replaces_bench_id BIGINT DEFAULT NULL COMMENT '被替换的退役长凳ID(仅替换新凳有值)',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_node_id (node_id),
     INDEX idx_code (code),
+    INDEX idx_retired (retired),
     CONSTRAINT fk_bench_node FOREIGN KEY (node_id) REFERENCES tree_node(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='长凳档案表';
+
+CREATE TABLE IF NOT EXISTS bench_retirement (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    bench_id BIGINT NOT NULL COMMENT '退役长凳ID',
+    bench_code VARCHAR(50) NOT NULL COMMENT '退役长凳编号(台账快照)',
+    node_id BIGINT NOT NULL COMMENT '退役时所在点位ID(原点位)',
+    retired_reason VARCHAR(500) NOT NULL COMMENT '报废退役原因',
+    retired_at DATETIME NOT NULL COMMENT '退役时间',
+    retired_by VARCHAR(50) NOT NULL COMMENT '退役经办人',
+    replacement_bench_id BIGINT DEFAULT NULL COMMENT '原点位登记的替换新凳ID',
+    replacement_bench_code VARCHAR(50) DEFAULT NULL COMMENT '替换新凳编号',
+    replaced_at DATETIME NULL COMMENT '替换登记时间',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_bench_id (bench_id),
+    INDEX idx_node_id (node_id),
+    INDEX idx_retired_at (retired_at),
+    INDEX idx_replacement (replacement_bench_id),
+    CONSTRAINT fk_retirement_bench FOREIGN KEY (bench_id) REFERENCES bench(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='长凳报废退役台账表';
 
 CREATE TABLE IF NOT EXISTS bench_change_log (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,

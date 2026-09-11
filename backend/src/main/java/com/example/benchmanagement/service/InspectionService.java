@@ -45,6 +45,8 @@ public class InspectionService {
 
     /**
      * 发起巡检并关联来源巡检任务（任务派发场景）。
+     * 先对全部巡检项做校验（长凳存在、在范围内、字段完整），
+     * 全部通过后才批量写入；任一失败抛错回滚，不留下部分数据。
      */
     @Transactional
     public List<InspectionDTO> createInspection(InspectionCreateRequest request, Long taskId) {
@@ -66,7 +68,8 @@ public class InspectionService {
         String inspector = (request.getInspector() == null || request.getInspector().isBlank())
                 ? "system" : request.getInspector().trim();
 
-        List<InspectionDTO> results = new ArrayList<>();
+        // 先逐项校验，全部通过后再写入，避免校验失败时已写入部分记录
+        List<Bench> benches = new ArrayList<>();
         for (InspectionItemRequest item : request.getItems()) {
             Bench bench = benchRepository.findById(item.getBenchId())
                     .orElseThrow(() -> new IllegalArgumentException("长凳不存在: " + item.getBenchId()));
@@ -74,9 +77,15 @@ public class InspectionService {
                 throw new IllegalArgumentException(String.format(
                         "长凳【%s】不在所选巡检范围内", bench.getCode()));
             }
+            validateItem(item, item.getResult());
+            benches.add(bench);
+        }
 
+        List<InspectionDTO> results = new ArrayList<>();
+        for (int i = 0; i < request.getItems().size(); i++) {
+            InspectionItemRequest item = request.getItems().get(i);
+            Bench bench = benches.get(i);
             int result = item.getResult();
-            validateItem(item, result);
 
             BenchInspection inspection = BenchInspection.builder()
                     .benchId(bench.getId())

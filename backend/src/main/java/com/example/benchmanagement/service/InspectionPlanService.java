@@ -3,6 +3,7 @@ package com.example.benchmanagement.service;
 import com.example.benchmanagement.dto.BenchDTO;
 import com.example.benchmanagement.dto.InspectionCreateRequest;
 import com.example.benchmanagement.dto.InspectionDTO;
+import com.example.benchmanagement.dto.InspectionItemRequest;
 import com.example.benchmanagement.dto.InspectionPlanDTO;
 import com.example.benchmanagement.dto.InspectionPlanDetailDTO;
 import com.example.benchmanagement.dto.InspectionPlanRequest;
@@ -23,8 +24,13 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -155,8 +161,10 @@ public class InspectionPlanService {
     }
 
     /**
-     * 执行巡检任务：提交范围内长凳的巡检记录并关联任务，
-     * 重复执行或空范围给出明确提示。
+     * 执行巡检任务：先校验提交清单与任务范围内当前长凳集合完全一致
+     * （少报、重复、包含已移出范围的长凳均阻止提交并列出原因），
+     * 校验通过后才批量写入巡检记录并将任务置为已执行；
+     * 整体处于同一事务中，任何失败都会回滚，不会留下部分数据。
      */
     @Transactional
     public List<InspectionDTO> executeTask(Long taskId, TaskExecuteRequest request) {
@@ -173,6 +181,8 @@ public class InspectionPlanService {
             throw new IllegalArgumentException("该任务巡检范围内暂无长凳，无法执行");
         }
 
+        validateTaskItems(benches, request.getItems());
+
         String inspector = (request.getInspector() == null || request.getInspector().isBlank())
                 ? task.getInspector() : request.getInspector().trim();
         InspectionCreateRequest createRequest = InspectionCreateRequest.builder()
@@ -188,6 +198,78 @@ public class InspectionPlanService {
         taskRepository.save(task);
         log.info("巡检任务执行完成: taskId={}, planId={}, 巡检记录{}条", task.getId(), task.getPlanId(), created.size());
         return created;
+    }
+
+    /**
+     * 校验提交清单与任务范围内当前长凳集合完全一致：
+     * 少报、重复提交、包含已移出范围（或已删除）的长凳时，
+     * 汇总全部原因后抛出异常阻止提交。
+     */
+    private void validateTaskItems(List<Bench> scopeBenches, List<InspectionItemRequest> items) {
+        Map<Long, Bench> scopeBenchMap = scopeBenches.stream()
+                .collect(Collectors.toMap(Bench::getId, b -> b));
+        List<Long> submittedIds = items == null ? List.of() : items.stream()
+                .map(InspectionItemRequest::getBenchId)
+                .filter(Objects::nonNull)
+                .toList();
+
+        // 查出提交长凳的当前信息，用于在提示中列出编号（已删除的长凳只显示ID）
+        Map<Long, Bench> submittedBenchMap = new HashMap<>();
+        if (!submittedIds.isEmpty()) {
+            for (Bench bench : benchRepository.findAllById(submittedIds)) {
+                submittedBenchMap.put(bench.getId(), bench);
+            }
+        }
+
+        List<String> problems = new ArrayList<>();
+
+        // 1) 重复提交
+        Map<Long, Long> submitCounts = submittedIds.stream()
+                .collect(Collectors.groupingBy(id -> id, Collectors.counting()));
+        List<String> duplicated = submitCounts.entrySet().stream()
+                .filter(e -> e.getValue() > 1)
+                .map(e -> benchLabel(e.getKey(), submittedBenchMap.get(e.getKey())) + "（提交" + e.getValue() + "次）")
+                .sorted()
+                .toList();
+        if (!duplicated.isEmpty()) {
+            problems.add("重复提交的长凳：" + String.join("、", duplicated));
+        }
+
+        // 2) 不在任务当前范围内（已移出范围或已删除）
+        List<String> outOfScope = submittedIds.stream()
+                .distinct()
+                .filter(id -> !scopeBenchMap.containsKey(id))
+                .map(id -> {
+                    Bench bench = submittedBenchMap.get(id);
+                    return bench != null
+                            ? benchLabel(id, bench) + "（已移出任务范围）"
+                            : "ID=" + id + "（长凳不存在）";
+                })
+                .sorted()
+                .toList();
+        if (!outOfScope.isEmpty()) {
+            problems.add("不在任务范围内的长凳：" + String.join("、", outOfScope));
+        }
+
+        // 3) 少报：范围内但未提交
+        Set<Long> submittedSet = new HashSet<>(submittedIds);
+        List<String> missing = scopeBenches.stream()
+                .filter(b -> !submittedSet.contains(b.getId()))
+                .map(b -> benchLabel(b.getId(), b))
+                .sorted()
+                .toList();
+        if (!missing.isEmpty()) {
+            problems.add("未提交巡检记录的长凳：" + String.join("、", missing));
+        }
+
+        if (!problems.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "提交清单与任务范围内当前长凳不一致，已阻止提交：" + String.join("；", problems));
+        }
+    }
+
+    private String benchLabel(Long benchId, Bench bench) {
+        return bench != null ? "【" + bench.getCode() + "】" : "ID=" + benchId;
     }
 
     /**

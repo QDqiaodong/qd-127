@@ -37,6 +37,12 @@ public class InspectionTaskDTO {
     /** 是否逾期（待执行且计划日期早于今天） */
     private Boolean overdue;
 
+    /** 任务范围内当前是否存在封闭点位（提示任务暂无法执行） */
+    private Boolean hasClosedPoint;
+
+    /** 范围内封闭点位名称（多个用、连接） */
+    private String closedPointNames;
+
     private LocalDateTime executedAt;
 
     private LocalDateTime createdAt;

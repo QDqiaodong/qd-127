@@ -153,11 +153,20 @@ public class InspectionPlanService {
     }
 
     /**
-     * 执行任务时自动带入范围内全部长凳。
+     * 执行任务时自动带入范围内全部长凳（封闭点位上的长凳不带入）。
      */
     public List<BenchDTO> getTaskBenches(Long taskId) {
         InspectionTask task = getTask(taskId);
-        return benchService.getBenchesByNode(task.getScopeNodeId());
+        TreeNode scopeNode = treeNodeRepository.findByIdAndIsDeletedFalse(task.getScopeNodeId())
+                .orElseThrow(() -> new IllegalArgumentException("任务巡检范围节点不存在或已被删除"));
+        if (scopeNode.getLevel() == 3 && inspectionService.isPointClosed(scopeNode)) {
+            return List.of();
+        }
+        List<Long> pointIds = filterOpenPoints(inspectionService.collectScopePointIds(scopeNode));
+        if (pointIds.isEmpty()) {
+            return List.of();
+        }
+        return benchService.getBenchesByNodeIds(pointIds);
     }
 
     /**
@@ -175,10 +184,21 @@ public class InspectionPlanService {
 
         TreeNode scopeNode = treeNodeRepository.findByIdAndIsDeletedFalse(task.getScopeNodeId())
                 .orElseThrow(() -> new IllegalArgumentException("任务巡检范围节点不存在或已被删除"));
+
+        // 封闭点位禁止执行待办任务
+        if (scopeNode.getLevel() == 3 && inspectionService.isPointClosed(scopeNode)) {
+            throw new IllegalStateException(String.format(
+                    "点位【%s】处于临时封闭期（截止%s），该巡检任务暂无法执行，点位解封后恢复",
+                    scopeNode.getName(),
+                    scopeNode.getClosedEndAt() != null ? scopeNode.getClosedEndAt() : "未设置"));
+        }
+
         List<Long> pointIds = inspectionService.collectScopePointIds(scopeNode);
+        // 街区/路段范围下剔除封闭点位（其上长凳不参与本次任务）
+        pointIds = filterOpenPoints(pointIds);
         List<Bench> benches = pointIds.isEmpty() ? List.of() : benchRepository.findByNodeIds(pointIds);
         if (benches.isEmpty()) {
-            throw new IllegalArgumentException("该任务巡检范围内暂无长凳，无法执行");
+            throw new IllegalArgumentException("该任务巡检范围内暂无可巡检长凳（点位可能处于封闭期），无法执行");
         }
 
         validateTaskItems(benches, request.getItems());
@@ -329,6 +349,7 @@ public class InspectionPlanService {
 
     /**
      * 校验巡检范围：必须是街区/路段/点位，且范围内有点位、有长凳（空范围明确提示）。
+     * 以封闭点位为范围禁止保存计划；街区/路段范围允许保存，但执行任务时自动跳过封闭点位。
      */
     private TreeNode validateScope(Long scopeNodeId) {
         TreeNode node = treeNodeRepository.findByIdAndIsDeletedFalse(scopeNodeId)
@@ -336,14 +357,33 @@ public class InspectionPlanService {
         if (node.getLevel() < 1 || node.getLevel() > 3) {
             throw new IllegalArgumentException("巡检范围必须是街区、路段或点位");
         }
-        List<Long> pointIds = inspectionService.collectScopePointIds(node);
+        if (node.getLevel() == 3 && inspectionService.isPointClosed(node)) {
+            throw new IllegalStateException(String.format(
+                    "点位【%s】处于临时封闭期（截止%s），封闭期内禁止以该点位创建巡检计划",
+                    node.getName(),
+                    node.getClosedEndAt() != null ? node.getClosedEndAt() : "未设置"));
+        }
+        List<Long> pointIds = filterOpenPoints(inspectionService.collectScopePointIds(node));
         if (pointIds.isEmpty()) {
-            throw new IllegalArgumentException("所选范围下没有点位，无法保存巡检计划");
+            throw new IllegalArgumentException("所选范围下没有可巡检点位，无法保存巡检计划");
         }
         if (benchRepository.findByNodeIds(pointIds).isEmpty()) {
             throw new IllegalArgumentException("所选范围下暂无长凳，无法保存巡检计划");
         }
         return node;
+    }
+
+    /**
+     * 剔除范围内处于封闭期的点位，返回当前可巡检点位ID集合。
+     */
+    private List<Long> filterOpenPoints(List<Long> pointIds) {
+        if (pointIds == null || pointIds.isEmpty()) {
+            return List.of();
+        }
+        return treeNodeRepository.findByIdsAndIsDeletedFalse(pointIds).stream()
+                .filter(p -> !inspectionService.isPointClosed(p))
+                .map(TreeNode::getId)
+                .toList();
     }
 
     private InspectionPlan getPlan(Long id) {
@@ -405,6 +445,22 @@ public class InspectionPlanService {
 
     private InspectionTaskDTO toTaskDTO(InspectionTask task, String planName) {
         TreeNode scopeNode = treeNodeRepository.findByIdAndIsDeletedFalse(task.getScopeNodeId()).orElse(null);
+        boolean hasClosedPoint = false;
+        String closedPointNames = null;
+        if (scopeNode != null && task.getStatus() != null
+                && task.getStatus() == InspectionTask.STATUS_PENDING) {
+            List<TreeNode> scopePoints = scopeNode.getLevel() == 3
+                    ? List.of(scopeNode)
+                    : treeNodeRepository.findByIdsAndIsDeletedFalse(
+                            inspectionService.collectScopePointIds(scopeNode));
+            List<String> closedNames = scopePoints.stream()
+                    .filter(inspectionService::isPointClosed)
+                    .map(TreeNode::getName)
+                    .sorted()
+                    .toList();
+            hasClosedPoint = !closedNames.isEmpty();
+            closedPointNames = hasClosedPoint ? String.join("、", closedNames) : null;
+        }
         return InspectionTaskDTO.builder()
                 .id(task.getId())
                 .planId(task.getPlanId())
@@ -416,6 +472,8 @@ public class InspectionPlanService {
                 .inspector(task.getInspector())
                 .status(task.getStatus())
                 .overdue(isOverdue(task))
+                .hasClosedPoint(hasClosedPoint)
+                .closedPointNames(closedPointNames)
                 .executedAt(task.getExecutedAt())
                 .createdAt(task.getCreatedAt())
                 .build();

@@ -58,4 +58,13 @@ public class BenchDTO {
 
     /** 当前未完成（待处理/维修中）工单数 */
     private Long openOrderCount;
+
+    /** 所属点位是否封闭中（到期自动解封后为false） */
+    private Boolean pointClosed;
+
+    /** 点位封闭结束时间（封闭中时返回） */
+    private java.time.LocalDateTime pointClosedEndAt;
+
+    /** 点位封闭原因（封闭中时返回） */
+    private String pointClosedReason;
 }

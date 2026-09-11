@@ -41,6 +41,22 @@ public class TreeNode {
     @Column(name = "capacity_updated_reason")
     private String capacityUpdatedReason;
 
+    /** 封闭状态：1-封闭中，0/null-未封闭（仅点位 level=3 使用） */
+    @Column(name = "closed")
+    private Integer closed;
+
+    /** 封闭开始时间 */
+    @Column(name = "closed_start_at")
+    private LocalDateTime closedStartAt;
+
+    /** 封闭结束时间（到期后自动解封） */
+    @Column(name = "closed_end_at")
+    private LocalDateTime closedEndAt;
+
+    /** 封闭原因 */
+    @Column(name = "closed_reason")
+    private String closedReason;
+
     @Column(name = "is_deleted")
     private Boolean isDeleted;
 

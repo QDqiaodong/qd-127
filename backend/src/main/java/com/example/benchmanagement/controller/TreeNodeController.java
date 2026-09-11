@@ -3,6 +3,9 @@ package com.example.benchmanagement.controller;
 import com.example.benchmanagement.dto.ApiResponse;
 import com.example.benchmanagement.dto.CapacityAdjustRequest;
 import com.example.benchmanagement.dto.NodeCapacityLogDTO;
+import com.example.benchmanagement.dto.NodeClosureLogDTO;
+import com.example.benchmanagement.dto.PointClosureRequest;
+import com.example.benchmanagement.dto.PointReopenRequest;
 import com.example.benchmanagement.dto.TreeNodeDTO;
 import com.example.benchmanagement.service.TreeNodeService;
 import jakarta.validation.Valid;
@@ -66,6 +69,42 @@ public class TreeNodeController {
     public ResponseEntity<ApiResponse<List<NodeCapacityLogDTO>>> getCapacityLogs(@PathVariable Long id) {
         List<NodeCapacityLogDTO> logs = treeNodeService.getCapacityLogs(id);
         return ResponseEntity.ok(ApiResponse.success(logs));
+    }
+
+    /**
+     * 临时封闭点位：填写起止时间和原因。
+     */
+    @PutMapping("/{id}/close")
+    public ResponseEntity<ApiResponse<TreeNodeDTO>> closePoint(@PathVariable Long id,
+                                                               @Valid @RequestBody PointClosureRequest request) {
+        TreeNodeDTO updated = treeNodeService.closePoint(id, request);
+        return ResponseEntity.ok(ApiResponse.success("点位已临时封闭", updated));
+    }
+
+    /**
+     * 人工解封点位。
+     */
+    @PutMapping("/{id}/reopen")
+    public ResponseEntity<ApiResponse<TreeNodeDTO>> reopenPoint(@PathVariable Long id,
+                                                                @Valid @RequestBody PointReopenRequest request) {
+        TreeNodeDTO updated = treeNodeService.reopenPoint(id, request);
+        return ResponseEntity.ok(ApiResponse.success("点位已解封", updated));
+    }
+
+    /**
+     * 单个点位的封闭/解封台账。
+     */
+    @GetMapping("/{id}/closure-logs")
+    public ResponseEntity<ApiResponse<List<NodeClosureLogDTO>>> getClosureLogs(@PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.success(treeNodeService.getClosureLogs(id)));
+    }
+
+    /**
+     * 全部分点位封闭/解封台账。
+     */
+    @GetMapping("/closure-logs/all")
+    public ResponseEntity<ApiResponse<List<NodeClosureLogDTO>>> getAllClosureLogs() {
+        return ResponseEntity.ok(ApiResponse.success(treeNodeService.getAllClosureLogs()));
     }
 
     @DeleteMapping("/{id}")

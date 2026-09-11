@@ -42,6 +42,18 @@ public class TreeNodeDTO {
     /** 容量最近调整原因 */
     private String capacityUpdatedReason;
 
+    /** 是否封闭中（仅点位 level=3 有效，已考虑到期自动解封） */
+    private Boolean closed;
+
+    /** 封闭开始时间 */
+    private java.time.LocalDateTime closedStartAt;
+
+    /** 封闭结束时间 */
+    private java.time.LocalDateTime closedEndAt;
+
+    /** 封闭原因 */
+    private String closedReason;
+
     private List<TreeNodeDTO> children;
 
     private String path;

@@ -9,6 +9,10 @@ CREATE TABLE IF NOT EXISTS tree_node (
     capacity INT DEFAULT NULL COMMENT '可摆放长凳上限(仅level=3点位)',
     capacity_updated_at TIMESTAMP NULL DEFAULT NULL COMMENT '容量最近调整时间',
     capacity_updated_reason VARCHAR(500) DEFAULT NULL COMMENT '容量最近调整原因',
+    closed TINYINT DEFAULT 0 COMMENT '封闭状态：1-封闭中，0-未封闭(仅level=3点位)',
+    closed_start_at DATETIME NULL DEFAULT NULL COMMENT '封闭开始时间',
+    closed_end_at DATETIME NULL DEFAULT NULL COMMENT '封闭结束时间(到期自动解封)',
+    closed_reason VARCHAR(500) DEFAULT NULL COMMENT '封闭原因',
     is_deleted TINYINT DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -61,6 +65,21 @@ CREATE TABLE IF NOT EXISTS node_capacity_log (
     INDEX idx_node_id (node_id),
     INDEX idx_adjusted_at (adjusted_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='点位容量调整记录表';
+
+CREATE TABLE IF NOT EXISTS node_closure_log (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    node_id BIGINT NOT NULL COMMENT '点位ID(level=3)',
+    action_type TINYINT NOT NULL COMMENT '动作类型：1-封闭，2-人工解封，3-到期自动解封',
+    closed_start_at DATETIME NULL COMMENT '封闭开始时间',
+    closed_end_at DATETIME NULL COMMENT '封闭结束时间',
+    closed_reason VARCHAR(500) COMMENT '封闭原因',
+    reopen_reason VARCHAR(500) COMMENT '解封原因(人工解封时填写)',
+    operated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '操作时间',
+    operated_by VARCHAR(50) DEFAULT 'system',
+    INDEX idx_node_id (node_id),
+    INDEX idx_operated_at (operated_at),
+    CONSTRAINT fk_closure_node FOREIGN KEY (node_id) REFERENCES tree_node(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='点位封闭/解封记录表';
 
 CREATE TABLE IF NOT EXISTS bench_inspection (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,

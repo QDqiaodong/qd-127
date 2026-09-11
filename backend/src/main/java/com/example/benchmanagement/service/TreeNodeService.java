@@ -2,17 +2,23 @@ package com.example.benchmanagement.service;
 
 import com.example.benchmanagement.dto.CapacityAdjustRequest;
 import com.example.benchmanagement.dto.NodeCapacityLogDTO;
+import com.example.benchmanagement.dto.NodeClosureLogDTO;
+import com.example.benchmanagement.dto.PointClosureRequest;
+import com.example.benchmanagement.dto.PointReopenRequest;
 import com.example.benchmanagement.dto.TreeNodeDTO;
 import com.example.benchmanagement.entity.NodeCapacityLog;
+import com.example.benchmanagement.entity.NodeClosureLog;
 import com.example.benchmanagement.entity.TreeNode;
 import com.example.benchmanagement.repository.BenchRepository;
 import com.example.benchmanagement.repository.NodeCapacityLogRepository;
+import com.example.benchmanagement.repository.NodeClosureLogRepository;
 import com.example.benchmanagement.repository.TreeNodeRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -26,6 +32,7 @@ public class TreeNodeService {
     private final TreeNodeRepository treeNodeRepository;
     private final BenchRepository benchRepository;
     private final NodeCapacityLogRepository capacityLogRepository;
+    private final NodeClosureLogRepository closureLogRepository;
 
     public List<TreeNodeDTO> getTree() {
         List<TreeNode> allNodes = treeNodeRepository.findAllActiveNodes();
@@ -224,6 +231,184 @@ public class TreeNodeService {
                 .toList();
     }
 
+    /**
+     * 临时封闭点位：填写起止时间和原因；封闭期内禁止调入长凳、禁止以该点位发起巡检或执行待办任务。
+     */
+    @Transactional
+    public TreeNodeDTO closePoint(Long id, PointClosureRequest request) {
+        TreeNode node = requirePoint(id);
+        if (isClosed(node)) {
+            throw new IllegalStateException("点位已处于封闭状态，请勿重复封闭，如需调整请先解封");
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime startAt = request.getStartAt();
+        LocalDateTime endAt = request.getEndAt();
+        if (endAt.isBefore(startAt) || endAt.isEqual(startAt)) {
+            throw new IllegalArgumentException("封闭结束时间必须晚于开始时间");
+        }
+        if (endAt.isBefore(now)) {
+            throw new IllegalArgumentException("封闭结束时间不能早于当前时间");
+        }
+
+        String reason = request.getReason().trim();
+        node.setClosed(1);
+        node.setClosedStartAt(startAt);
+        node.setClosedEndAt(endAt);
+        node.setClosedReason(reason);
+        TreeNode saved = treeNodeRepository.save(node);
+
+        closureLogRepository.save(NodeClosureLog.builder()
+                .nodeId(id)
+                .actionType(NodeClosureLog.ACTION_CLOSE)
+                .closedStartAt(startAt)
+                .closedEndAt(endAt)
+                .closedReason(reason)
+                .operatedBy("system")
+                .build());
+
+        log.info("点位临时封闭: nodeId={}, startAt={}, endAt={}, reason={}", id, startAt, endAt, reason);
+        return toDTOWithCapacity(saved);
+    }
+
+    /**
+     * 人工解封点位，解封原因记入台账；解封后恢复调入长凳与巡检。
+     */
+    @Transactional
+    public TreeNodeDTO reopenPoint(Long id, PointReopenRequest request) {
+        TreeNode node = requirePoint(id);
+        if (!Integer.valueOf(1).equals(node.getClosed())) {
+            throw new IllegalStateException("点位当前未处于封闭状态，无需解封");
+        }
+
+        String reason = request.getReason().trim();
+        LocalDateTime startAt = node.getClosedStartAt();
+        LocalDateTime endAt = node.getClosedEndAt();
+        String closedReason = node.getClosedReason();
+
+        node.setClosed(0);
+        node.setClosedStartAt(null);
+        node.setClosedEndAt(null);
+        node.setClosedReason(null);
+        TreeNode saved = treeNodeRepository.save(node);
+
+        closureLogRepository.save(NodeClosureLog.builder()
+                .nodeId(id)
+                .actionType(NodeClosureLog.ACTION_REOPEN_MANUAL)
+                .closedStartAt(startAt)
+                .closedEndAt(endAt)
+                .closedReason(closedReason)
+                .reopenReason(reason)
+                .operatedBy("system")
+                .build());
+
+        log.info("点位人工解封: nodeId={}, reason={}", id, reason);
+        return toDTOWithCapacity(saved);
+    }
+
+    public List<NodeClosureLogDTO> getClosureLogs(Long nodeId) {
+        TreeNode node = treeNodeRepository.findByIdAndIsDeletedFalse(nodeId)
+                .orElseThrow(() -> new IllegalArgumentException("点位不存在"));
+        return closureLogRepository.findByNodeIdOrderByOperatedAtDescIdDesc(nodeId).stream()
+                .map(l -> toClosureLogDTO(l, node.getName()))
+                .toList();
+    }
+
+    public List<NodeClosureLogDTO> getAllClosureLogs() {
+        Map<Long, String> nodeNames = new HashMap<>();
+        return closureLogRepository.findAllByOrderByOperatedAtDescIdDesc().stream()
+                .map(l -> toClosureLogDTO(l, nodeNames.computeIfAbsent(l.getNodeId(), nid ->
+                        treeNodeRepository.findById(nid).map(TreeNode::getName).orElse("已删除点位"))))
+                .toList();
+    }
+
+    /**
+     * 到期自动解封：把已过结束时间但仍标记封闭的点位解除封闭并登记台账。
+     * 由定时任务及应用启动时调用。
+     */
+    @Transactional
+    public int autoExpireClosedPoints() {
+        LocalDateTime now = LocalDateTime.now();
+        int expired = 0;
+        for (TreeNode node : treeNodeRepository.findByLevelAndIsDeletedFalse(3)) {
+            if (Integer.valueOf(1).equals(node.getClosed())
+                    && node.getClosedEndAt() != null
+                    && !node.getClosedEndAt().isAfter(now)) {
+                LocalDateTime startAt = node.getClosedStartAt();
+                LocalDateTime endAt = node.getClosedEndAt();
+                String closedReason = node.getClosedReason();
+
+                node.setClosed(0);
+                node.setClosedStartAt(null);
+                node.setClosedEndAt(null);
+                node.setClosedReason(null);
+                treeNodeRepository.save(node);
+
+                closureLogRepository.save(NodeClosureLog.builder()
+                        .nodeId(node.getId())
+                        .actionType(NodeClosureLog.ACTION_REOPEN_AUTO)
+                        .closedStartAt(startAt)
+                        .closedEndAt(endAt)
+                        .closedReason(closedReason)
+                        .operatedBy("system")
+                        .build());
+                expired++;
+                log.info("点位封闭到期自动解封: nodeId={}, endAt={}", node.getId(), endAt);
+            }
+        }
+        return expired;
+    }
+
+    /**
+     * 判断点位当前是否封闭（含到期自动解封判断）；到期但尚未落库时按未封闭处理。
+     */
+    public boolean isPointClosed(Long pointId) {
+        return treeNodeRepository.findByIdAndIsDeletedFalse(pointId)
+                .filter(this::isClosed)
+                .isPresent();
+    }
+
+    private TreeNode requirePoint(Long id) {
+        TreeNode node = treeNodeRepository.findByIdAndIsDeletedFalse(id)
+                .orElseThrow(() -> new IllegalArgumentException("点位不存在"));
+        if (node.getLevel() != 3) {
+            throw new IllegalArgumentException("只有点位(level=3)可以设置封闭");
+        }
+        return node;
+    }
+
+    /**
+     * 封闭状态的实时判断：标记封闭且未到结束时间。
+     */
+    private boolean isClosed(TreeNode node) {
+        if (!Integer.valueOf(1).equals(node.getClosed())) {
+            return false;
+        }
+        return node.getClosedEndAt() == null || node.getClosedEndAt().isAfter(LocalDateTime.now());
+    }
+
+    private NodeClosureLogDTO toClosureLogDTO(NodeClosureLog l, String nodeName) {
+        String label = switch (l.getActionType()) {
+            case NodeClosureLog.ACTION_CLOSE -> "封闭";
+            case NodeClosureLog.ACTION_REOPEN_MANUAL -> "人工解封";
+            case NodeClosureLog.ACTION_REOPEN_AUTO -> "到期自动解封";
+            default -> "未知";
+        };
+        return NodeClosureLogDTO.builder()
+                .id(l.getId())
+                .nodeId(l.getNodeId())
+                .nodeName(nodeName)
+                .actionType(l.getActionType())
+                .actionTypeLabel(label)
+                .closedStartAt(l.getClosedStartAt())
+                .closedEndAt(l.getClosedEndAt())
+                .closedReason(l.getClosedReason())
+                .reopenReason(l.getReopenReason())
+                .operatedAt(l.getOperatedAt())
+                .operatedBy(l.getOperatedBy())
+                .build();
+    }
+
     @Transactional
     public void deleteNode(Long id) {
         TreeNode node = treeNodeRepository.findByIdAndIsDeletedFalse(id)
@@ -274,23 +459,35 @@ public class TreeNodeService {
     }
 
     /**
-     * 批量填充点位的占用数、剩余数与有效容量。
+     * 批量填充点位的占用数、剩余数、有效容量及封闭状态。
      */
     private void fillCapacityStatus(List<TreeNodeDTO> points) {
         if (points == null || points.isEmpty()) {
             return;
         }
         List<Long> pointIds = points.stream().map(TreeNodeDTO::getId).toList();
+        Map<Long, TreeNode> nodeMap = new HashMap<>();
+        for (TreeNode node : treeNodeRepository.findByIdsAndIsDeletedFalse(pointIds)) {
+            nodeMap.put(node.getId(), node);
+        }
         Map<Long, Long> countMap = new HashMap<>();
         for (Object[] row : benchRepository.countByNodeIds(pointIds)) {
             countMap.put((Long) row[0], (Long) row[1]);
         }
         for (TreeNodeDTO point : points) {
+            TreeNode node = nodeMap.get(point.getId());
             int capacity = point.getCapacity() != null ? point.getCapacity() : TreeNode.DEFAULT_CAPACITY;
             point.setCapacity(capacity);
             long occupied = countMap.getOrDefault(point.getId(), 0L);
             point.setOccupiedCount(occupied);
             point.setRemainingCount(Math.max(0, capacity - occupied));
+            boolean closed = node != null && isClosed(node);
+            point.setClosed(closed);
+            if (closed) {
+                point.setClosedStartAt(node.getClosedStartAt());
+                point.setClosedEndAt(node.getClosedEndAt());
+                point.setClosedReason(node.getClosedReason());
+            }
         }
     }
 
@@ -304,6 +501,10 @@ public class TreeNodeService {
                 .capacity(node.getCapacity())
                 .capacityUpdatedAt(node.getCapacityUpdatedAt())
                 .capacityUpdatedReason(node.getCapacityUpdatedReason())
+                .closed(node.getLevel() == 3 && isClosed(node))
+                .closedStartAt(node.getLevel() == 3 ? node.getClosedStartAt() : null)
+                .closedEndAt(node.getLevel() == 3 ? node.getClosedEndAt() : null)
+                .closedReason(node.getLevel() == 3 ? node.getClosedReason() : null)
                 .children(new ArrayList<>())
                 .build();
     }

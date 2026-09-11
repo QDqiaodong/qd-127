@@ -31,6 +31,7 @@ public class BenchService {
     private final RedisTemplate<String, Object> redisTemplate;
     private final InspectionService inspectionService;
     private final RepairOrderService repairOrderService;
+    private final TreeNodeService treeNodeService;
 
     private static final String REDIS_KEY_PREFIX = "bench:specs:";
 
@@ -108,6 +109,20 @@ public class BenchService {
         }
 
         List<Bench> benches = benchRepository.findByNodeIds(targetNodeIds);
+        return mapBenchDTOs(benches);
+    }
+
+    /**
+     * 按点位ID集合查询长凳（任务执行场景，封闭点位已在调用方剔除）。
+     */
+    public List<BenchDTO> getBenchesByNodeIds(List<Long> pointIds) {
+        if (pointIds == null || pointIds.isEmpty()) {
+            return List.of();
+        }
+        return mapBenchDTOs(benchRepository.findByNodeIds(pointIds));
+    }
+
+    private List<BenchDTO> mapBenchDTOs(List<Bench> benches) {
         List<Long> benchIds = benches.stream().map(Bench::getId).toList();
         Map<Long, BenchInspection> latestMap = inspectionService.latestInspectionMap(benchIds);
         Map<Long, Long> openOrderMap = repairOrderService.openOrderCountMap(benchIds);
@@ -119,6 +134,7 @@ public class BenchService {
     @Transactional
     public BenchDTO createBench(BenchDTO dto) {
         TreeNode point = validateNodeLevel3(dto.getNodeId());
+        assertPointNotClosed(point);
 
         if (benchRepository.existsByCode(dto.getCode())) {
             throw new IllegalArgumentException("长凳编号已存在");
@@ -176,6 +192,7 @@ public class BenchService {
 
         if (dto.getNodeId() != null && !dto.getNodeId().equals(bench.getNodeId())) {
             TreeNode targetPoint = validateNodeLevel3(dto.getNodeId());
+            assertPointNotClosed(targetPoint);
             assertCapacityAvailable(targetPoint, 1);
 
             Long oldNodeId = bench.getNodeId();
@@ -220,6 +237,7 @@ public class BenchService {
     @Transactional
     public List<BenchDTO> changeBenchNode(BenchChangeRequest request) {
         TreeNode targetPoint = validateNodeLevel3(request.getNewNodeId());
+        assertPointNotClosed(targetPoint);
 
         if (request.getBenchIds() == null || request.getBenchIds().isEmpty()) {
             throw new IllegalArgumentException("长凳ID列表不能为空");
@@ -325,6 +343,18 @@ public class BenchService {
     }
 
     /**
+     * 封闭期内禁止往该点位调入（新增/移入）长凳。
+     */
+    private void assertPointNotClosed(TreeNode point) {
+        if (treeNodeService.isPointClosed(point.getId())) {
+            String endAt = point.getClosedEndAt() != null ? point.getClosedEndAt().toString() : "未设置";
+            throw new IllegalStateException(String.format(
+                    "点位【%s】处于临时封闭期（截止%s），封闭期内禁止调入长凳，到期或人工解封后恢复",
+                    point.getName(), endAt));
+        }
+    }
+
+    /**
      * 校验目标点位是否还有足够容量摆放 incoming 张长凳。
      *
      * @param point            目标点位
@@ -375,6 +405,8 @@ public class BenchService {
                 ? treeNodeRepository.findByIdAndIsDeletedFalse(section.getParentId()).orElse(null)
                 : null;
 
+        boolean pointClosed = point != null && treeNodeService.isPointClosed(point.getId());
+
         return BenchDTO.builder()
                 .id(bench.getId())
                 .code(bench.getCode())
@@ -393,6 +425,9 @@ public class BenchService {
                 .latestInspectionSeverity(latestInspection != null ? latestInspection.getSeverity() : null)
                 .latestProblemType(latestInspection != null ? latestInspection.getProblemType() : null)
                 .openOrderCount(openOrderCount)
+                .pointClosed(pointClosed)
+                .pointClosedEndAt(pointClosed ? point.getClosedEndAt() : null)
+                .pointClosedReason(pointClosed ? point.getClosedReason() : null)
                 .build();
     }
 

@@ -41,6 +41,14 @@
                 <span v-if="data.remainingCount === 0" class="capacity-full">已满</span>
                 <span v-else>余{{ data.remainingCount }}</span>
               </el-tag>
+              <el-tag
+                v-if="data.level === 3 && data.closed"
+                size="small"
+                type="danger"
+                class="capacity-tag"
+              >
+                封闭中
+              </el-tag>
             </span>
           </template>
         </el-tree>

@@ -61,6 +61,21 @@ public class InspectionService {
             throw new IllegalArgumentException("所选巡检范围下没有点位，无法发起巡检");
         }
 
+        // 封闭点位禁止发起巡检；街区/路段范围下自动剔除封闭点位上的长凳
+        assertScopeInspectable(scopeNode, scopePointIds);
+        Set<Long> closedPointIds = new HashSet<>();
+        for (TreeNode point : treeNodeRepository.findByIdsAndIsDeletedFalse(new ArrayList<>(scopePointIds))) {
+            if (isPointClosed(point)) {
+                closedPointIds.add(point.getId());
+            }
+        }
+        if (!closedPointIds.isEmpty()) {
+            scopePointIds.removeAll(closedPointIds);
+            if (scopePointIds.isEmpty()) {
+                throw new IllegalStateException("所选巡检范围内的点位均处于封闭期，无法发起巡检");
+            }
+        }
+
         if (request.getItems() == null || request.getItems().isEmpty()) {
             throw new IllegalArgumentException("巡检记录不能为空");
         }
@@ -70,15 +85,25 @@ public class InspectionService {
 
         // 先逐项校验，全部通过后再写入，避免校验失败时已写入部分记录
         List<Bench> benches = new ArrayList<>();
+        List<String> closedBenchCodes = new ArrayList<>();
         for (InspectionItemRequest item : request.getItems()) {
             Bench bench = benchRepository.findById(item.getBenchId())
                     .orElseThrow(() -> new IllegalArgumentException("长凳不存在: " + item.getBenchId()));
             if (!scopePointIds.contains(bench.getNodeId())) {
-                throw new IllegalArgumentException(String.format(
-                        "长凳【%s】不在所选巡检范围内", bench.getCode()));
+                if (closedPointIds.contains(bench.getNodeId())) {
+                    closedBenchCodes.add(bench.getCode());
+                } else {
+                    throw new IllegalArgumentException(String.format(
+                            "长凳【%s】不在所选巡检范围内", bench.getCode()));
+                }
+            } else {
+                validateItem(item, item.getResult());
             }
-            validateItem(item, item.getResult());
             benches.add(bench);
+        }
+        if (!closedBenchCodes.isEmpty()) {
+            throw new IllegalStateException("以下长凳所在点位处于临时封闭期，封闭期内禁止巡检："
+                    + String.join("、", closedBenchCodes));
         }
 
         List<InspectionDTO> results = new ArrayList<>();
@@ -223,6 +248,40 @@ public class InspectionService {
         }
         return treeNodeRepository.findByParentIdInAndIsDeletedFalse(childIds)
                 .stream().map(TreeNode::getId).toList();
+    }
+
+    /**
+     * 判断点位当前是否封闭（标记封闭且未到结束时间）。
+     */
+    public boolean isPointClosed(TreeNode point) {
+        if (!Integer.valueOf(1).equals(point.getClosed())) {
+            return false;
+        }
+        return point.getClosedEndAt() == null
+                || point.getClosedEndAt().isAfter(java.time.LocalDateTime.now());
+    }
+
+    /**
+     * 点位封闭期内禁止以该点位为范围发起巡检；
+     * 街区/路段范围下若所有点位都在封闭，也无法发起。
+     */
+    private void assertScopeInspectable(TreeNode scopeNode, Set<Long> scopePointIds) {
+        if (scopeNode.getLevel() == 3 && isPointClosed(scopeNode)) {
+            throw new IllegalStateException(String.format(
+                    "点位【%s】处于临时封闭期（截止%s），封闭期内禁止发起巡检，到期或人工解封后恢复",
+                    scopeNode.getName(),
+                    scopeNode.getClosedEndAt() != null ? scopeNode.getClosedEndAt() : "未设置"));
+        }
+        List<TreeNode> points = treeNodeRepository.findByIdsAndIsDeletedFalse(new ArrayList<>(scopePointIds));
+        List<String> closedNames = points.stream()
+                .filter(this::isPointClosed)
+                .map(TreeNode::getName)
+                .sorted()
+                .toList();
+        if (!closedNames.isEmpty() && closedNames.size() == points.size()) {
+            throw new IllegalStateException("所选范围内的点位全部处于封闭期（"
+                    + String.join("、", closedNames) + "），无法发起巡检");
+        }
     }
 
     private String trimToNull(String value) {

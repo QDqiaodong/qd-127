@@ -19,6 +19,9 @@ public class InspectionDTO {
 
     private String benchCode;
 
+    /** 来源巡检任务ID（由计划任务执行产生时返回） */
+    private Long taskId;
+
     private Long scopeNodeId;
 
     private String scopeNodeName;

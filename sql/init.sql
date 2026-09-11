@@ -74,13 +74,47 @@ CREATE TABLE IF NOT EXISTS bench_inspection (
     suggestion VARCHAR(1000) COMMENT '处理建议',
     inspector VARCHAR(50) DEFAULT 'system' COMMENT '检查人',
     repair_order_id BIGINT COMMENT '由该巡检异常生成的维修工单ID',
+    task_id BIGINT COMMENT '来源巡检任务ID(由计划任务执行产生)',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_bench_id (bench_id),
     INDEX idx_inspected_at (inspected_at),
     INDEX idx_result_severity (result, severity),
+    INDEX idx_task_id (task_id),
     CONSTRAINT fk_inspection_bench FOREIGN KEY (bench_id) REFERENCES bench(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='长凳巡检记录表';
+
+CREATE TABLE IF NOT EXISTS inspection_plan (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL COMMENT '计划名称',
+    scope_node_id BIGINT NOT NULL COMMENT '巡检范围节点ID(街区/路段/点位)',
+    cycle_type TINYINT NOT NULL COMMENT '巡检周期：1-每天，2-每周，3-每月',
+    plan_date DATE NOT NULL COMMENT '首次计划日期',
+    inspector VARCHAR(50) NOT NULL COMMENT '检查人',
+    enabled TINYINT NOT NULL DEFAULT 1 COMMENT '启用状态：1-启用，0-停用',
+    remark VARCHAR(500) COMMENT '备注',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_scope_node_id (scope_node_id),
+    INDEX idx_enabled (enabled),
+    CONSTRAINT fk_plan_node FOREIGN KEY (scope_node_id) REFERENCES tree_node(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='巡检计划表';
+
+CREATE TABLE IF NOT EXISTS inspection_task (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    plan_id BIGINT NOT NULL COMMENT '所属巡检计划ID',
+    scope_node_id BIGINT NOT NULL COMMENT '巡检范围节点快照',
+    plan_date DATE NOT NULL COMMENT '计划执行日期',
+    inspector VARCHAR(50) COMMENT '检查人',
+    status TINYINT NOT NULL DEFAULT 1 COMMENT '状态：1-待执行，2-已执行(逾期由计划日期推导)',
+    executed_at DATETIME NULL COMMENT '执行时间',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_plan_date (plan_id, plan_date),
+    INDEX idx_plan_date (plan_date),
+    INDEX idx_status (status),
+    CONSTRAINT fk_task_plan FOREIGN KEY (plan_id) REFERENCES inspection_plan(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='巡检任务表';
 
 CREATE TABLE IF NOT EXISTS repair_order (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,

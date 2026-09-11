@@ -40,6 +40,14 @@ public class InspectionService {
      */
     @Transactional
     public List<InspectionDTO> createInspection(InspectionCreateRequest request) {
+        return createInspection(request, null);
+    }
+
+    /**
+     * 发起巡检并关联来源巡检任务（任务派发场景）。
+     */
+    @Transactional
+    public List<InspectionDTO> createInspection(InspectionCreateRequest request, Long taskId) {
         TreeNode scopeNode = treeNodeRepository.findByIdAndIsDeletedFalse(request.getScopeNodeId())
                 .orElseThrow(() -> new IllegalArgumentException("巡检范围节点不存在"));
         if (scopeNode.getLevel() < 1 || scopeNode.getLevel() > 3) {
@@ -80,6 +88,7 @@ public class InspectionService {
                     .description(BenchInspection.RESULT_ABNORMAL == result ? trimToNull(item.getDescription()) : null)
                     .suggestion(trimToNull(item.getSuggestion()))
                     .inspector(inspector)
+                    .taskId(taskId)
                     .build();
             BenchInspection saved = inspectionRepository.save(inspection);
 
@@ -187,7 +196,10 @@ public class InspectionService {
         }
     }
 
-    private List<Long> collectScopePointIds(TreeNode node) {
+    /**
+     * 收集范围节点（街区/路段/点位）下的全部点位ID。
+     */
+    public List<Long> collectScopePointIds(TreeNode node) {
         if (node.getLevel() == 3) {
             return List.of(node.getId());
         }
@@ -235,6 +247,7 @@ public class InspectionService {
                 .id(inspection.getId())
                 .benchId(inspection.getBenchId())
                 .benchCode(bench != null ? bench.getCode() : "")
+                .taskId(inspection.getTaskId())
                 .scopeNodeId(inspection.getScopeNodeId())
                 .scopeNodeName(scopeNodeNameOverride != null ? scopeNodeNameOverride
                         : scopeNode != null ? scopeNode.getName() : "")

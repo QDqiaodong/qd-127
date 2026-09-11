@@ -55,6 +55,10 @@ public class BenchInspection {
     @Column(name = "repair_order_id")
     private Long repairOrderId;
 
+    /** 来源巡检任务ID（由巡检计划任务派发执行时填写） */
+    @Column(name = "task_id")
+    private Long taskId;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 

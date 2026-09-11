@@ -80,6 +80,12 @@
               <template #default="{ row }">{{ row.suggestion || '-' }}</template>
             </el-table-column>
             <el-table-column prop="inspector" label="检查人" width="90" />
+            <el-table-column label="来源任务" width="90">
+              <template #default="{ row }">
+                <span v-if="row.taskId">#{{ row.taskId }}</span>
+                <span v-else>-</span>
+              </template>
+            </el-table-column>
             <el-table-column label="关联工单" width="100">
               <template #default="{ row }">
                 <el-button

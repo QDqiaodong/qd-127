@@ -140,7 +140,11 @@ public class BenchService {
             throw new IllegalArgumentException("长凳编号已存在");
         }
 
-        assertCapacityAvailable(point, 1);
+        int status = dto.getStatus() != null ? dto.getStatus() : Bench.STATUS_NORMAL;
+        // 只有在用长凳占用容量；直接建档为停用的长凳不占用容量
+        if (status == Bench.STATUS_NORMAL) {
+            assertCapacityAvailable(point, 1);
+        }
 
         Bench bench = Bench.builder()
                 .code(dto.getCode())
@@ -150,7 +154,7 @@ public class BenchService {
                 .height(dto.getHeight())
                 .nodeId(dto.getNodeId())
                 .specsJson(dto.getSpecsJson())
-                .status(dto.getStatus() != null ? dto.getStatus() : 1)
+                .status(status)
                 .build();
 
         Bench saved = benchRepository.save(bench);
@@ -355,18 +359,19 @@ public class BenchService {
     }
 
     /**
-     * 校验目标点位是否还有足够容量摆放 incoming 张长凳。
+     * 校验目标点位是否还有足够容量摆放 incoming 张在用长凳。
+     * 占用数只统计状态为在用(1)的长凳，停用长凳不计入容量。
      *
      * @param point            目标点位
-     * @param incoming         本次拟新增（含变更进入）的长凳数量
+     * @param incoming         本次拟新增（含变更进入）的在用长凳数量
      */
     private void assertCapacityAvailable(TreeNode point, long incoming) {
         int capacity = point.getCapacity() != null ? point.getCapacity() : TreeNode.DEFAULT_CAPACITY;
-        long occupied = benchRepository.countByNodeId(point.getId());
+        long occupied = benchRepository.countActiveByNodeId(point.getId());
         long available = capacity - occupied;
         if (occupied + incoming > capacity) {
             throw new IllegalArgumentException(String.format(
-                    "点位【%s】容量不足：容量上限%d张，当前已摆放%d张，剩余%d个空位，本次需占用%d个，操作已阻止",
+                    "点位【%s】容量不足：容量上限%d张，当前在用%d张，剩余%d个空位，本次需占用%d个，操作已阻止",
                     point.getName(), capacity, occupied, Math.max(0, available), incoming));
         }
     }

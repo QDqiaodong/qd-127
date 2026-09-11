@@ -183,10 +183,10 @@ public class TreeNodeService {
             throw new IllegalArgumentException("新容量与当前容量一致，无需调整");
         }
 
-        long occupied = benchRepository.countByNodeId(id);
+        long occupied = benchRepository.countActiveByNodeId(id);
         if (newCapacity < occupied) {
             throw new IllegalArgumentException(String.format(
-                    "容量调整失败：当前点位已摆放%d张长凳，容量不能低于当前占用数", occupied));
+                    "容量调整失败：当前点位已摆放%d张在用长凳，容量不能低于当前占用数", occupied));
         }
 
         Integer oldCapacity = node.getCapacity();
@@ -471,7 +471,7 @@ public class TreeNodeService {
             nodeMap.put(node.getId(), node);
         }
         Map<Long, Long> countMap = new HashMap<>();
-        for (Object[] row : benchRepository.countByNodeIds(pointIds)) {
+        for (Object[] row : benchRepository.countActiveByNodeIds(pointIds)) {
             countMap.put((Long) row[0], (Long) row[1]);
         }
         for (TreeNodeDTO point : points) {

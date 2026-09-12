@@ -32,13 +32,21 @@
         <el-select v-model="filters.sectionId" placeholder="选择路段" class="filter-item" clearable :disabled="!filters.districtId">
           <el-option v-for="s in filteredSections" :key="s.id" :value="s.id" :label="s.name" />
         </el-select>
-        <el-select v-model="filters.status" placeholder="预案状态" class="filter-item" clearable>
+        <el-select v-model="filters.status" placeholder="预案状态" class="filter-item" clearable @change="loadPlans">
           <el-option label="待投放" :value="1" />
           <el-option label="已投放" :value="2" />
           <el-option label="逾期" :value="3" />
         </el-select>
         <el-button type="primary" @click="loadPlans">查询</el-button>
         <el-button @click="resetFilters">重置</el-button>
+      </div>
+
+      <div v-if="plans.length > 0" class="result-summary">
+        共 <b>{{ plans.length }}</b> 条{{ filters.status ? `（${statusLabel(filters.status)}）` : '' }}预案
+        <template v-if="pendingBenchTotal > 0">
+          ，待投放合计 <b>{{ pendingBenchTotal }}</b> 张
+        </template>
+        <span class="summary-tip">与街区树路段上的“待加凳/逾期”标记同一口径，可直接对照</span>
       </div>
 
       <el-table :data="plans" v-loading="loading" border class="data-table">
@@ -83,6 +91,9 @@
             </el-button>
           </template>
         </el-table-column>
+        <template #empty>
+          <el-empty :description="emptyDescription" :image-size="60" />
+        </template>
       </el-table>
     </el-card>
 
@@ -236,6 +247,32 @@ const filters = ref({
   status: null
 })
 
+// 筛选项持久化：关掉页面再打开时恢复上次的筛选条件，保证列表条数与树上标记仍对得上
+const FILTER_STORAGE_KEY = 'additional-bench-plan-filters'
+
+const restoreFilters = () => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(FILTER_STORAGE_KEY))
+    if (saved && typeof saved === 'object') {
+      filters.value = {
+        districtId: saved.districtId ?? null,
+        sectionId: saved.sectionId ?? null,
+        status: [1, 2, 3].includes(saved.status) ? saved.status : null
+      }
+    }
+  } catch (error) {
+    localStorage.removeItem(FILTER_STORAGE_KEY)
+  }
+}
+
+const persistFilters = () => {
+  localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify({
+    districtId: filters.value.districtId,
+    sectionId: filters.value.sectionId,
+    status: filters.value.status
+  }))
+}
+
 const createDialogVisible = ref(false)
 const createForm = ref({
   districtId: null,
@@ -270,6 +307,22 @@ const statusTagType = (status) => ({
   3: 'danger'
 }[status] || 'info')
 
+// 当前筛选结果的待投放合计：与街区树路段“待加凳 N”标记同源，便于逐路段对数
+const pendingBenchTotal = computed(() =>
+  plans.value.reduce((sum, plan) => sum + (plan.pendingCount || 0), 0)
+)
+
+// 空列表提示：明确区分是某类状态没有预案，还是所选街区/路段没有预案
+const emptyDescription = computed(() => {
+  if (filters.value.status) {
+    return `暂无${statusLabel(filters.value.status)}的加凳预案`
+  }
+  if (filters.value.sectionId || filters.value.districtId) {
+    return '所选街区/路段暂无加凳预案'
+  }
+  return '暂无加凳预案，可点击右上角“新增加凳预案”创建'
+})
+
 const loadTreeData = async () => {
   const tree = await getTree()
   districts.value = tree
@@ -278,6 +331,14 @@ const loadTreeData = async () => {
     map[district.id] = district.children || []
   })
   sectionMap.value = map
+  // 恢复的上次筛选项可能已失效（街区/路段被删除），清空悬空项避免查出空结果却说不清原因
+  if (filters.value.districtId && !map[filters.value.districtId]) {
+    filters.value.districtId = null
+    filters.value.sectionId = null
+  } else if (filters.value.sectionId
+    && !(map[filters.value.districtId] || []).some(s => s.id === filters.value.sectionId)) {
+    filters.value.sectionId = null
+  }
 }
 
 const loadPlans = async () => {
@@ -288,6 +349,7 @@ const loadPlans = async () => {
       sectionId: filters.value.sectionId || undefined,
       status: filters.value.status || undefined
     })
+    persistFilters()
   } catch (error) {
     ElMessage.error(error.message || '加载加凳预案失败')
   } finally {
@@ -297,7 +359,8 @@ const loadPlans = async () => {
 
 const reloadAll = async () => {
   try {
-    await Promise.all([loadTreeData(), loadPlans()])
+    await loadTreeData()
+    await loadPlans()
   } catch (error) {
     ElMessage.error(error.message || '刷新失败')
   }
@@ -435,7 +498,10 @@ const openDetailDialog = async (row) => {
   }
 }
 
-onMounted(reloadAll)
+onMounted(() => {
+  restoreFilters()
+  reloadAll()
+})
 </script>
 
 <style scoped>
@@ -462,6 +528,25 @@ onMounted(reloadAll)
 
 .filter-item {
   width: 180px;
+}
+
+.result-summary {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 12px;
+  color: #606266;
+  font-size: 13px;
+}
+
+.result-summary b {
+  color: #303133;
+}
+
+.summary-tip {
+  margin-left: 8px;
+  color: #909399;
+  font-size: 12px;
 }
 
 .data-table {

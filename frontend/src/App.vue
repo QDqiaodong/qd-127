@@ -60,10 +60,20 @@ import InspectionPlanManagement from './components/InspectionPlanManagement.vue'
 import AdditionalBenchPlanManagement from './components/AdditionalBenchPlanManagement.vue'
 import ChangeLogManagement from './components/ChangeLogManagement.vue'
 
-const activeMenu = ref('tree')
+// 记住当前菜单：关掉页面再打开时回到原页面，页面内筛选项由各自组件恢复
+const MENU_STORAGE_KEY = 'bench-management-active-menu'
+const MENU_KEYS = ['tree', 'bench', 'inspection', 'lighting', 'plan', 'additional-bench', 'change']
+
+const restoreActiveMenu = () => {
+  const saved = localStorage.getItem(MENU_STORAGE_KEY)
+  return MENU_KEYS.includes(saved) ? saved : 'tree'
+}
+
+const activeMenu = ref(restoreActiveMenu())
 
 const handleMenuSelect = (index) => {
   activeMenu.value = index
+  localStorage.setItem(MENU_STORAGE_KEY, index)
 }
 </script>
 

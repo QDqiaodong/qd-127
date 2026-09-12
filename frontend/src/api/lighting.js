@@ -5,3 +5,5 @@ export const createLightingInspection = (data) => request.post('/lighting', data
 export const getLightingInspections = (params) => request.get('/lighting', { params })
 export const getPointLightingStatuses = (params) => request.get('/lighting/point-status', { params })
 export const getLightingInspectionsByPoint = (pointId) => request.get(`/lighting/point/${pointId}`)
+// 路段夜间照明异常汇总（只含有异常点位的路段）
+export const getSectionLightingSummary = () => request.get('/lighting/section-summary')

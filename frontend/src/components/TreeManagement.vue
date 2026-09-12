@@ -31,6 +31,16 @@
                 {{ data.level === 1 ? '街区' : data.level === 2 ? '路段' : '点位' }}
               </span>
               <el-tag
+                v-if="data.level === 2 && data.lightingAbnormalCount > 0"
+                size="small"
+                type="danger"
+                effect="plain"
+                class="capacity-tag section-lighting-tag"
+                @click.stop="openSectionLightingDetail(data)"
+              >
+                照明异常 {{ data.lightingAbnormalCount }} 处
+              </el-tag>
+              <el-tag
                 v-if="data.level === 3"
                 size="small"
                 :type="capacityTagType(data)"
@@ -149,8 +159,34 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="capacityLogVisible" :title="`容量调整记录 - ${capacityLogNodeName}`" width="640px">
-      <el-table :data="capacityLogs" border size="small">
+    <el-dialog
+      v-model="sectionLightingVisible"
+      :title="`路段照明异常点位 - ${sectionLightingNode ? sectionLightingNode.name : ''}`"
+      width="640px"
+    >
+      <el-table v-loading="sectionLightingLoading" :data="sectionLightingPoints" border size="small" max-height="420">
+        <el-table-column prop="pointName" label="点位" />
+        <el-table-column label="异常类型" width="100">
+          <template #default="{ row }">
+            <el-tag type="danger" size="small" effect="plain">{{ row.problemType }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="灯具数量" width="90">
+          <template #default="{ row }">{{ row.lampCount ?? '-' }}</template>
+        </el-table-column>
+        <el-table-column label="巡查人" width="100">
+          <template #default="{ row }">{{ row.inspector || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="最近巡查时间" width="170">
+          <template #default="{ row }">{{ row.latestInspectedAt || '-' }}</template>
+        </el-table-column>
+        <template #empty>
+          <el-empty description="该路段暂无照明异常点位" :image-size="60" />
+        </template>
+      </el-table>
+    </el-dialog>
+
+    <el-dialog v-model="capacityLogVisible" :title="`容量调整记录 - ${capacityLogNodeName}`" width="640px">      <el-table :data="capacityLogs" border size="small">
         <el-table-column prop="adjustedAt" label="调整时间" width="170" />
         <el-table-column label="容量变化" width="110">
           <template #default="{ row }">
@@ -222,6 +258,7 @@ import { Plus, Edit, Delete, Download, Location, Grid, CirclePlus, Tickets } fro
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getTree, createNode, updateNode, deleteNode, adjustCapacity, getCapacityLogs } from '../api/tree'
 import { getBenchesByNode, exportAssets } from '../api/bench'
+import { getPointLightingStatuses } from '../api/lighting'
 
 const treeData = ref([])
 const treeProps = {
@@ -250,6 +287,27 @@ const sectionBenchCount = ref(0)
 const capacityLogVisible = ref(false)
 const capacityLogs = ref([])
 const capacityLogNodeName = ref('')
+
+// 路段照明异常下钻
+const sectionLightingVisible = ref(false)
+const sectionLightingNode = ref(null)
+const sectionLightingPoints = ref([])
+const sectionLightingLoading = ref(false)
+
+// 点开路段异常标记，下钻到该路段的异常点位（与点位照明状态同源）
+const openSectionLightingDetail = async (node) => {
+  sectionLightingNode.value = node
+  sectionLightingPoints.value = []
+  sectionLightingVisible.value = true
+  sectionLightingLoading.value = true
+  try {
+    sectionLightingPoints.value = await getPointLightingStatuses({ sectionId: node.id, result: 0 })
+  } catch (error) {
+    ElMessage.error(error.message || '加载路段照明异常点位失败')
+  } finally {
+    sectionLightingLoading.value = false
+  }
+}
 
 const exportDialogVisible = ref(false)
 const exportScope = ref('all')
@@ -565,6 +623,10 @@ onMounted(() => {
 
 .capacity-tag {
   margin-left: 4px;
+}
+
+.section-lighting-tag {
+  cursor: pointer;
 }
 
 .capacity-full {

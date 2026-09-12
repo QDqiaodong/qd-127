@@ -61,6 +61,7 @@ public class TreeNodeService {
         }
 
         fillPointStatus(pointDtos);
+        fillSectionLightingAbnormalCount(nodeMap.values());
 
         rootNodes.sort((a, b) -> Integer.compare(a.getSortOrder(), b.getSortOrder()));
         for (TreeNodeDTO node : nodeMap.values()) {
@@ -76,6 +77,9 @@ public class TreeNodeService {
         if (level == 3) {
             fillPointStatus(dtos);
         }
+        if (level == 2) {
+            fillSectionLightingAbnormalCountByQuery(dtos);
+        }
         return dtos;
     }
 
@@ -85,6 +89,10 @@ public class TreeNodeService {
         List<TreeNodeDTO> pointDtos = dtos.stream().filter(d -> d.getLevel() == 3).toList();
         if (!pointDtos.isEmpty()) {
             fillPointStatus(pointDtos);
+        }
+        List<TreeNodeDTO> sectionDtos = dtos.stream().filter(d -> d.getLevel() == 2).toList();
+        if (!sectionDtos.isEmpty()) {
+            fillSectionLightingAbnormalCountByQuery(sectionDtos);
         }
         return dtos;
     }
@@ -522,6 +530,52 @@ public class TreeNodeService {
                 point.setLightingProblemType(latest.getProblemType());
                 point.setLightingInspectedAt(latest.getInspectedAt());
             }
+        }
+    }
+
+    /**
+     * 填充路段的照明异常点数：路段下最近一次照明结论为异常的点位数。
+     * 直接统计树上已填充的点位照明标记，保证路段计数与点位标记同源一致。
+     */
+    private void fillSectionLightingAbnormalCount(java.util.Collection<TreeNodeDTO> nodes) {
+        for (TreeNodeDTO node : nodes) {
+            if (node.getLevel() != null && node.getLevel() == 2) {
+                long count = node.getChildren().stream()
+                        .filter(p -> Integer.valueOf(PointLightingInspection.RESULT_ABNORMAL)
+                                .equals(p.getLightingResult()))
+                        .count();
+                node.setLightingAbnormalCount((int) count);
+            }
+        }
+    }
+
+    /**
+     * 平铺返回路段列表时，按路段id批量查询点位最近一次照明结论并填充异常点数，
+     * 口径与树上路段计数一致。
+     */
+    private void fillSectionLightingAbnormalCountByQuery(List<TreeNodeDTO> sections) {
+        if (sections == null || sections.isEmpty()) {
+            return;
+        }
+        List<Long> sectionIds = sections.stream().map(TreeNodeDTO::getId).toList();
+        List<TreeNode> points = treeNodeRepository.findByParentIdInAndIsDeletedFalse(sectionIds);
+        Map<Long, Integer> abnormalBySection = new HashMap<>();
+        if (!points.isEmpty()) {
+            List<Long> pointIds = points.stream().map(TreeNode::getId).toList();
+            Map<Long, PointLightingInspection> latestMap = new HashMap<>();
+            for (PointLightingInspection inspection
+                    : lightingInspectionRepository.findByPointIdInOrderByInspectedAtDescIdDesc(pointIds)) {
+                latestMap.putIfAbsent(inspection.getPointId(), inspection);
+            }
+            for (TreeNode point : points) {
+                PointLightingInspection latest = latestMap.get(point.getId());
+                if (latest != null && latest.getResult() == PointLightingInspection.RESULT_ABNORMAL) {
+                    abnormalBySection.merge(point.getParentId(), 1, Integer::sum);
+                }
+            }
+        }
+        for (TreeNodeDTO section : sections) {
+            section.setLightingAbnormalCount(abnormalBySection.getOrDefault(section.getId(), 0));
         }
     }
 

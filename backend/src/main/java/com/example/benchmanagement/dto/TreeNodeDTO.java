@@ -63,6 +63,9 @@ public class TreeNodeDTO {
     /** 最近一次照明巡查时间（仅点位 level=3 有效） */
     private java.time.LocalDateTime lightingInspectedAt;
 
+    /** 路段下最近一次照明结论为异常的点位数（仅路段 level=2 有效，与点位照明标记同源） */
+    private Integer lightingAbnormalCount;
+
     private List<TreeNodeDTO> children;
 
     private String path;

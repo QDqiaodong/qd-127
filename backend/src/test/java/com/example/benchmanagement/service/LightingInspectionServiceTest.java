@@ -3,6 +3,7 @@ package com.example.benchmanagement.service;
 import com.example.benchmanagement.dto.LightingInspectionCreateRequest;
 import com.example.benchmanagement.dto.LightingInspectionDTO;
 import com.example.benchmanagement.dto.PointLightingStatusDTO;
+import com.example.benchmanagement.dto.SectionLightingSummaryDTO;
 import com.example.benchmanagement.entity.PointLightingInspection;
 import com.example.benchmanagement.entity.TreeNode;
 import com.example.benchmanagement.repository.PointLightingInspectionRepository;
@@ -212,13 +213,13 @@ class LightingInspectionServiceTest {
         when(treeNodeRepository.findAllActiveNodes())
                 .thenReturn(List.of(district, section, pointA, pointB));
 
-        List<PointLightingStatusDTO> uninspected = lightingInspectionService.getPointStatuses(false);
+        List<PointLightingStatusDTO> uninspected = lightingInspectionService.getPointStatuses(false, null, null);
         assertEquals(1, uninspected.size());
         assertEquals(31L, uninspected.get(0).getPointId());
         assertFalse(uninspected.get(0).getInspected());
         assertNull(uninspected.get(0).getLatestResult());
 
-        List<PointLightingStatusDTO> inspected = lightingInspectionService.getPointStatuses(true);
+        List<PointLightingStatusDTO> inspected = lightingInspectionService.getPointStatuses(true, null, null);
         assertEquals(1, inspected.size());
         assertEquals(30L, inspected.get(0).getPointId());
         assertTrue(inspected.get(0).getInspected());
@@ -227,7 +228,7 @@ class LightingInspectionServiceTest {
         assertEquals("张三", inspected.get(0).getInspector());
         assertEquals("中心街区", inspected.get(0).getDistrictName());
 
-        assertEquals(2, lightingInspectionService.getPointStatuses(null).size());
+        assertEquals(2, lightingInspectionService.getPointStatuses(null, null, null).size());
     }
 
     @Test
@@ -250,5 +251,104 @@ class LightingInspectionServiceTest {
         assertEquals(1, map.size());
         assertEquals(2L, map.get(30L).getId());
         assertEquals("损坏", map.get(30L).getProblemType());
+    }
+
+    private PointLightingInspection inspection(Long id, Long pointId, int result, String problemType,
+                                               LocalDateTime inspectedAt) {
+        return PointLightingInspection.builder()
+                .id(id).pointId(pointId).result(result).lampCount(3)
+                .problemType(problemType).inspector("张三").inspectedAt(inspectedAt)
+                .build();
+    }
+
+    @Test
+    void sectionSummary_countsAbnormalMissingAndDamaged_perSection() {
+        TreeNode section2 = TreeNode.builder().id(21L).parentId(10L).level(2).name("副街路段").sortOrder(1).build();
+        TreeNode pointC = TreeNode.builder().id(32L).parentId(21L).level(3).name("点位C").sortOrder(0).capacity(2).build();
+        PointLightingInspection inspA = inspection(1L, 30L, PointLightingInspection.RESULT_ABNORMAL,
+                PointLightingInspection.PROBLEM_MISSING_LAMP, LocalDateTime.of(2026, 9, 12, 21, 0));
+        PointLightingInspection inspB = inspection(2L, 31L, PointLightingInspection.RESULT_ABNORMAL,
+                PointLightingInspection.PROBLEM_DAMAGED, LocalDateTime.of(2026, 9, 12, 22, 0));
+        PointLightingInspection inspC = inspection(3L, 32L, PointLightingInspection.RESULT_INTACT,
+                null, LocalDateTime.of(2026, 9, 12, 23, 0));
+        when(treeNodeRepository.findByLevelAndIsDeletedFalse(3)).thenReturn(List.of(pointA, pointB, pointC));
+        when(lightingRepository.findByPointIdInOrderByInspectedAtDescIdDesc(List.of(30L, 31L, 32L)))
+                .thenReturn(List.of(inspC, inspB, inspA));
+        when(treeNodeRepository.findAllActiveNodes())
+                .thenReturn(List.of(district, section, section2, pointA, pointB, pointC));
+
+        List<SectionLightingSummaryDTO> summaries = lightingInspectionService.getSectionSummaries();
+
+        // 副街路段无异常点位，不出汇总
+        assertEquals(1, summaries.size());
+        SectionLightingSummaryDTO summary = summaries.get(0);
+        assertEquals(20L, summary.getSectionId());
+        assertEquals("主街路段", summary.getSectionName());
+        assertEquals(10L, summary.getDistrictId());
+        assertEquals("中心街区", summary.getDistrictName());
+        assertEquals(2, summary.getAbnormalPointCount());
+        assertEquals(1, summary.getMissingLampCount());
+        assertEquals(1, summary.getDamagedCount());
+        assertEquals(LocalDateTime.of(2026, 9, 12, 22, 0), summary.getLatestInspectedAt());
+    }
+
+    @Test
+    void sectionSummary_usesLatestInspectionPerPoint() {
+        // 点位A最新一次已转为完好，旧的异常记录不再计入路段汇总
+        PointLightingInspection newer = inspection(2L, 30L, PointLightingInspection.RESULT_INTACT,
+                null, LocalDateTime.of(2026, 9, 12, 21, 0));
+        PointLightingInspection older = inspection(1L, 30L, PointLightingInspection.RESULT_ABNORMAL,
+                PointLightingInspection.PROBLEM_MISSING_LAMP, LocalDateTime.of(2026, 9, 10, 21, 0));
+        when(treeNodeRepository.findByLevelAndIsDeletedFalse(3)).thenReturn(List.of(pointA));
+        when(lightingRepository.findByPointIdInOrderByInspectedAtDescIdDesc(List.of(30L)))
+                .thenReturn(List.of(newer, older));
+        when(treeNodeRepository.findAllActiveNodes()).thenReturn(List.of(district, section, pointA));
+
+        assertTrue(lightingInspectionService.getSectionSummaries().isEmpty());
+    }
+
+    @Test
+    void sectionSummary_emptyWhenNoAbnormalPoints() {
+        // 全部完好或未巡查时，没有路段出汇总
+        PointLightingInspection inspA = inspection(1L, 30L, PointLightingInspection.RESULT_INTACT,
+                null, LocalDateTime.of(2026, 9, 12, 21, 0));
+        when(treeNodeRepository.findByLevelAndIsDeletedFalse(3)).thenReturn(List.of(pointA, pointB));
+        when(lightingRepository.findByPointIdInOrderByInspectedAtDescIdDesc(List.of(30L, 31L)))
+                .thenReturn(List.of(inspA));
+        when(treeNodeRepository.findAllActiveNodes()).thenReturn(List.of(district, section, pointA, pointB));
+
+        assertTrue(lightingInspectionService.getSectionSummaries().isEmpty());
+    }
+
+    @Test
+    void pointStatuses_drillDownBySectionAndResult() {
+        PointLightingInspection inspA = inspection(1L, 30L, PointLightingInspection.RESULT_ABNORMAL,
+                PointLightingInspection.PROBLEM_MISSING_LAMP, LocalDateTime.of(2026, 9, 12, 21, 0));
+        when(treeNodeRepository.findByIdAndIsDeletedFalse(20L)).thenReturn(Optional.of(section));
+        when(treeNodeRepository.findByParentIdAndIsDeletedFalse(20L)).thenReturn(List.of(pointA, pointB));
+        when(lightingRepository.findByPointIdInOrderByInspectedAtDescIdDesc(List.of(30L, 31L)))
+                .thenReturn(List.of(inspA));
+        when(treeNodeRepository.findAllActiveNodes()).thenReturn(List.of(district, section, pointA, pointB));
+
+        List<PointLightingStatusDTO> abnormal =
+                lightingInspectionService.getPointStatuses(null, 20L, PointLightingInspection.RESULT_ABNORMAL);
+        assertEquals(1, abnormal.size());
+        assertEquals(30L, abnormal.get(0).getPointId());
+        assertEquals("点位A", abnormal.get(0).getPointName());
+        assertEquals("缺灯", abnormal.get(0).getProblemType());
+        assertEquals("主街路段", abnormal.get(0).getSectionName());
+
+        assertEquals(0, lightingInspectionService
+                .getPointStatuses(null, 20L, PointLightingInspection.RESULT_INTACT).size());
+        assertEquals(2, lightingInspectionService.getPointStatuses(null, 20L, null).size());
+    }
+
+    @Test
+    void pointStatuses_drillDownWithNonSectionNode_throws() {
+        when(treeNodeRepository.findByIdAndIsDeletedFalse(30L)).thenReturn(Optional.of(pointA));
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> lightingInspectionService.getPointStatuses(null, 30L, 0));
+        assertTrue(ex.getMessage().contains("路段"));
     }
 }

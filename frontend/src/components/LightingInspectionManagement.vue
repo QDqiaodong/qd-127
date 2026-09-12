@@ -18,6 +18,46 @@
       </template>
 
       <el-tabs v-model="activeTab" @tab-change="handleTabChange">
+        <!-- ============ 路段异常汇总 ============ -->
+        <el-tab-pane label="路段异常汇总" name="summary">
+          <el-table :data="sectionSummaries" border class="data-table">
+            <el-table-column prop="districtName" label="街区" />
+            <el-table-column prop="sectionName" label="路段" />
+            <el-table-column label="异常点数" width="100">
+              <template #default="{ row }">
+                <el-tag type="danger" size="small">{{ row.abnormalPointCount }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="缺灯" width="90">
+              <template #default="{ row }">
+                <el-tag v-if="row.missingLampCount > 0" type="danger" size="small" effect="plain">
+                  {{ row.missingLampCount }}
+                </el-tag>
+                <span v-else>0</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="损坏" width="90">
+              <template #default="{ row }">
+                <el-tag v-if="row.damagedCount > 0" type="warning" size="small" effect="plain">
+                  {{ row.damagedCount }}
+                </el-tag>
+                <span v-else>0</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="最近巡查时间" width="170">
+              <template #default="{ row }">{{ row.latestInspectedAt || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="操作" width="120" fixed="right">
+              <template #default="{ row }">
+                <el-button size="small" link type="primary" @click="openSectionDetail(row)">点位明细</el-button>
+              </template>
+            </el-table-column>
+            <template #empty>
+              <el-empty description="暂无照明异常路段" :image-size="60" />
+            </template>
+          </el-table>
+        </el-tab-pane>
+
         <!-- ============ 点位照明状态 ============ -->
         <el-tab-pane label="点位照明状态" name="status">
           <div class="filter-section">
@@ -210,6 +250,34 @@
       </template>
     </el-dialog>
 
+    <!-- ============ 路段异常点位明细弹窗 ============ -->
+    <el-dialog
+      v-model="sectionDetailVisible"
+      :title="`照明异常点位 - ${sectionDetail?.districtName || ''} / ${sectionDetail?.sectionName || ''}`"
+      width="720px"
+    >
+      <el-table v-loading="sectionDetailLoading" :data="sectionDetailPoints" border size="small" max-height="420">
+        <el-table-column prop="pointName" label="点位" />
+        <el-table-column label="异常类型" width="100">
+          <template #default="{ row }">
+            <el-tag type="danger" size="small" effect="plain">{{ row.problemType }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="灯具数量" width="90">
+          <template #default="{ row }">{{ row.lampCount ?? '-' }}</template>
+        </el-table-column>
+        <el-table-column label="巡查人" width="100">
+          <template #default="{ row }">{{ row.inspector || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="最近巡查时间" width="170">
+          <template #default="{ row }">{{ row.latestInspectedAt || '-' }}</template>
+        </el-table-column>
+        <template #empty>
+          <el-empty description="该路段暂无照明异常点位" :image-size="60" />
+        </template>
+      </el-table>
+    </el-dialog>
+
     <!-- ============ 点位照明详情弹窗 ============ -->
     <el-dialog v-model="detailDialogVisible" title="点位照明详情" width="720px">
       <el-descriptions :column="2" border size="small" class="detail-desc">
@@ -261,7 +329,8 @@ import {
   createLightingInspection,
   getLightingInspections,
   getPointLightingStatuses,
-  getLightingInspectionsByPoint
+  getLightingInspectionsByPoint,
+  getSectionLightingSummary
 } from '../api/lighting'
 import {
   LIGHTING_PROBLEM_TYPES,
@@ -269,7 +338,7 @@ import {
   lightingResultTagType
 } from '../constants/lighting'
 
-const activeTab = ref('status')
+const activeTab = ref('summary')
 
 // 树形数据
 const districts = ref([])
@@ -304,6 +373,14 @@ const loadTreeData = async () => {
   pointParentMap.value = parent
   pointClosedMap.value = closed
 }
+
+// 路段异常汇总
+const sectionSummaries = ref([])
+// 路段下钻点位明细
+const sectionDetailVisible = ref(false)
+const sectionDetail = ref(null)
+const sectionDetailPoints = ref([])
+const sectionDetailLoading = ref(false)
 
 // 点位照明状态
 const statuses = ref([])
@@ -346,6 +423,30 @@ const createPoints = ref([])
 const detailDialogVisible = ref(false)
 const detailStatus = ref(null)
 const detailRecords = ref([])
+
+// ============ 路段异常汇总 ============
+const loadSectionSummaries = async () => {
+  try {
+    sectionSummaries.value = await getSectionLightingSummary()
+  } catch (e) {
+    ElMessage.error(e.message || '加载路段照明异常汇总失败')
+  }
+}
+
+// 点开路段下钻到异常点位明细（与点位照明状态同源）
+const openSectionDetail = async (row) => {
+  sectionDetail.value = row
+  sectionDetailPoints.value = []
+  sectionDetailVisible.value = true
+  sectionDetailLoading.value = true
+  try {
+    sectionDetailPoints.value = await getPointLightingStatuses({ sectionId: row.sectionId, result: 0 })
+  } catch (e) {
+    ElMessage.error(e.message || '加载路段异常点位失败')
+  } finally {
+    sectionDetailLoading.value = false
+  }
+}
 
 // ============ 点位照明状态 ============
 const loadStatuses = async () => {
@@ -543,17 +644,18 @@ const openPointDetail = async (row) => {
 }
 
 const handleTabChange = (name) => {
+  if (name === 'summary') loadSectionSummaries()
   if (name === 'status') loadStatuses()
   if (name === 'records') loadRecords()
 }
 
 const reloadAll = async () => {
-  await Promise.all([loadTreeData(), loadStatuses(), loadRecords()])
+  await Promise.all([loadTreeData(), loadSectionSummaries(), loadStatuses(), loadRecords()])
 }
 
 onMounted(async () => {
   await loadTreeData()
-  await Promise.all([loadStatuses(), loadRecords()])
+  await Promise.all([loadSectionSummaries(), loadStatuses(), loadRecords()])
 })
 </script>
 

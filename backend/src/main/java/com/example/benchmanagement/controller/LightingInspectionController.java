@@ -4,6 +4,7 @@ import com.example.benchmanagement.dto.ApiResponse;
 import com.example.benchmanagement.dto.LightingInspectionCreateRequest;
 import com.example.benchmanagement.dto.LightingInspectionDTO;
 import com.example.benchmanagement.dto.PointLightingStatusDTO;
+import com.example.benchmanagement.dto.SectionLightingSummaryDTO;
 import com.example.benchmanagement.service.LightingInspectionService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -42,12 +43,24 @@ public class LightingInspectionController {
     }
 
     /**
-     * 全部点位照明状态；inspected=false 可单独筛出未巡查点位。
+     * 全部点位照明状态；inspected=false 可单独筛出未巡查点位；
+     * sectionId 下钻单个路段，result 按最近一次照明结论筛选（路段异常点位明细用）。
      */
     @GetMapping("/point-status")
     public ResponseEntity<ApiResponse<List<PointLightingStatusDTO>>> getPointStatuses(
-            @RequestParam(value = "inspected", required = false) Boolean inspected) {
-        return ResponseEntity.ok(ApiResponse.success(lightingInspectionService.getPointStatuses(inspected)));
+            @RequestParam(value = "inspected", required = false) Boolean inspected,
+            @RequestParam(value = "sectionId", required = false) Long sectionId,
+            @RequestParam(value = "result", required = false) Integer result) {
+        return ResponseEntity.ok(ApiResponse.success(
+                lightingInspectionService.getPointStatuses(inspected, sectionId, result)));
+    }
+
+    /**
+     * 按路段汇总夜间照明异常：异常点数、缺灯数、损坏数；没有异常的路段不出汇总。
+     */
+    @GetMapping("/section-summary")
+    public ResponseEntity<ApiResponse<List<SectionLightingSummaryDTO>>> getSectionSummaries() {
+        return ResponseEntity.ok(ApiResponse.success(lightingInspectionService.getSectionSummaries()));
     }
 
     /**

@@ -3,6 +3,7 @@ package com.example.benchmanagement.service;
 import com.example.benchmanagement.dto.LightingInspectionCreateRequest;
 import com.example.benchmanagement.dto.LightingInspectionDTO;
 import com.example.benchmanagement.dto.PointLightingStatusDTO;
+import com.example.benchmanagement.dto.SectionLightingSummaryDTO;
 import com.example.benchmanagement.entity.PointLightingInspection;
 import com.example.benchmanagement.entity.TreeNode;
 import com.example.benchmanagement.repository.PointLightingInspectionRepository;
@@ -13,7 +14,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -127,10 +130,26 @@ public class LightingInspectionService {
 
     /**
      * 全部点位的照明状态（每点位取最近一次巡查结论）。
-     * inspected=true 只看已巡查，inspected=false 单独筛出未巡查点位，null 返回全部。
+     * inspected=true 只看已巡查，inspected=false 单独筛出未巡查点位，null 返回全部；
+     * sectionId 下钻单个路段的点位，result 按最近一次照明结论筛选（1-完好，0-异常）。
      */
-    public List<PointLightingStatusDTO> getPointStatuses(Boolean inspected) {
-        List<TreeNode> points = treeNodeRepository.findByLevelAndIsDeletedFalse(3);
+    public List<PointLightingStatusDTO> getPointStatuses(Boolean inspected, Long sectionId, Integer result) {
+        List<TreeNode> points;
+        if (sectionId != null) {
+            TreeNode section = treeNodeRepository.findByIdAndIsDeletedFalse(sectionId)
+                    .orElseThrow(() -> new IllegalArgumentException("路段不存在"));
+            if (section.getLevel() != 2) {
+                throw new IllegalArgumentException("只有路段(level=2)可以下钻查看点位照明状态");
+            }
+            points = treeNodeRepository.findByParentIdAndIsDeletedFalse(sectionId);
+        } else {
+            points = treeNodeRepository.findByLevelAndIsDeletedFalse(3);
+        }
+        if (result != null
+                && result != PointLightingInspection.RESULT_INTACT
+                && result != PointLightingInspection.RESULT_ABNORMAL) {
+            throw new IllegalArgumentException("照明结论只能为完好(1)或异常(0)");
+        }
         if (points.isEmpty()) {
             return List.of();
         }
@@ -147,6 +166,9 @@ public class LightingInspectionService {
             PointLightingInspection latest = latestMap.get(point.getId());
             boolean hasRecord = latest != null;
             if (inspected != null && inspected != hasRecord) {
+                continue;
+            }
+            if (result != null && (!hasRecord || !result.equals(latest.getResult()))) {
                 continue;
             }
             TreeNode section = point.getParentId() != null ? nodeMap.get(point.getParentId()) : null;
@@ -166,6 +188,71 @@ public class LightingInspectionService {
                     .build());
         }
         return statuses;
+    }
+
+    /**
+     * 按路段汇总夜间照明异常：异常点数、缺灯数、损坏数。
+     * 口径与树上点位照明标记一致（每点位取最近一次巡查结论）；
+     * 没有异常点位的路段不出汇总。
+     */
+    public List<SectionLightingSummaryDTO> getSectionSummaries() {
+        List<TreeNode> points = treeNodeRepository.findByLevelAndIsDeletedFalse(3);
+        if (points.isEmpty()) {
+            return List.of();
+        }
+        List<Long> pointIds = points.stream().map(TreeNode::getId).toList();
+        Map<Long, PointLightingInspection> latestMap = latestInspectionMap(pointIds);
+
+        Map<Long, TreeNode> nodeMap = new HashMap<>();
+        for (TreeNode node : treeNodeRepository.findAllActiveNodes()) {
+            nodeMap.put(node.getId(), node);
+        }
+
+        Map<Long, SectionLightingSummaryDTO> summaryBySection = new LinkedHashMap<>();
+        for (TreeNode point : points) {
+            PointLightingInspection latest = latestMap.get(point.getId());
+            if (latest == null || latest.getResult() != PointLightingInspection.RESULT_ABNORMAL) {
+                continue;
+            }
+            TreeNode section = point.getParentId() != null ? nodeMap.get(point.getParentId()) : null;
+            if (section == null) {
+                continue;
+            }
+            TreeNode district = section.getParentId() != null ? nodeMap.get(section.getParentId()) : null;
+            SectionLightingSummaryDTO summary = summaryBySection.computeIfAbsent(section.getId(),
+                    id -> SectionLightingSummaryDTO.builder()
+                            .sectionId(section.getId())
+                            .sectionName(section.getName())
+                            .districtId(district != null ? district.getId() : null)
+                            .districtName(district != null ? district.getName() : "")
+                            .abnormalPointCount(0)
+                            .missingLampCount(0)
+                            .damagedCount(0)
+                            .build());
+            summary.setAbnormalPointCount(summary.getAbnormalPointCount() + 1);
+            if (PointLightingInspection.PROBLEM_MISSING_LAMP.equals(latest.getProblemType())) {
+                summary.setMissingLampCount(summary.getMissingLampCount() + 1);
+            } else if (PointLightingInspection.PROBLEM_DAMAGED.equals(latest.getProblemType())) {
+                summary.setDamagedCount(summary.getDamagedCount() + 1);
+            }
+            if (summary.getLatestInspectedAt() == null
+                    || latest.getInspectedAt().isAfter(summary.getLatestInspectedAt())) {
+                summary.setLatestInspectedAt(latest.getInspectedAt());
+            }
+        }
+
+        // 按街区树顺序（街区排序号 → 路段排序号 → 路段id）输出，方便与树上标记逐条对照
+        return summaryBySection.values().stream()
+                .sorted(Comparator
+                        .comparing((SectionLightingSummaryDTO s) -> sortOrderOf(nodeMap, s.getDistrictId()))
+                        .thenComparing(s -> sortOrderOf(nodeMap, s.getSectionId()))
+                        .thenComparing(SectionLightingSummaryDTO::getSectionId))
+                .toList();
+    }
+
+    private int sortOrderOf(Map<Long, TreeNode> nodeMap, Long nodeId) {
+        TreeNode node = nodeId != null ? nodeMap.get(nodeId) : null;
+        return node != null && node.getSortOrder() != null ? node.getSortOrder() : 0;
     }
 
     /**

@@ -83,8 +83,10 @@ public class BenchController {
     }
 
     @GetMapping("/export/{sectionId}")
-    public ResponseEntity<ApiResponse<List<Map<String, Object>>>> exportAssets(@PathVariable Long sectionId) {
-        List<Map<String, Object>> assets = benchService.exportBenchAssets(sectionId);
+    public ResponseEntity<ApiResponse<List<Map<String, Object>>>> exportAssets(
+            @PathVariable Long sectionId,
+            @RequestParam(value = "scope", required = false) String scope) {
+        List<Map<String, Object>> assets = benchService.exportBenchAssets(sectionId, scope);
         return ResponseEntity.ok(ApiResponse.success(assets));
     }
 }

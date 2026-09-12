@@ -136,6 +136,30 @@
       </el-table>
     </el-dialog>
 
+    <el-dialog v-model="exportDialogVisible" title="导出路段资产" width="420px">
+      <el-form label-width="90px">
+        <el-form-item label="路段">
+          <span>{{ exportTargetNode ? exportTargetNode.name : '' }}</span>
+        </el-form-item>
+        <el-form-item label="导出范围">
+          <el-radio-group v-model="exportScope">
+            <el-radio value="all">全部（在用 + 停用）</el-radio>
+            <el-radio value="active">只导出在用</el-radio>
+            <el-radio value="disabled">只导出停用</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="统计口径">
+          <span class="form-tip">
+            文件中“点位占用/剩余”按在用长凳统计，与树上点位占用一致；停用凳数单独成列
+          </span>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="exportDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="confirmExport">导出</el-button>
+      </template>
+    </el-dialog>
+
     <el-menu
       v-if="menuVisible"
       :default-active="''"
@@ -199,6 +223,15 @@ const sectionBenchCount = ref(0)
 const capacityLogVisible = ref(false)
 const capacityLogs = ref([])
 const capacityLogNodeName = ref('')
+
+const exportDialogVisible = ref(false)
+const exportScope = ref('all')
+const exportTargetNode = ref(null)
+const exportScopeOptions = [
+  { value: 'all', label: '全部' },
+  { value: 'active', label: '在用' },
+  { value: 'disabled', label: '停用' }
+]
 
 const formLevel = computed(() => {
   if (isEdit.value) {
@@ -414,26 +447,38 @@ const closeMenu = () => {
   document.removeEventListener('click', closeMenu)
 }
 
-const handleExportSection = async () => {
+const handleExportSection = () => {
   if (!rightClickedNode.value || rightClickedNode.value.level !== 2) return
-  try {
-    const assets = await exportAssets(rightClickedNode.value.id)
-    const csv = convertToCSV(assets)
-    downloadCSV(csv, `路段_${rightClickedNode.value.name}_资产.csv`)
-    ElMessage.success('导出成功')
-  } catch (error) {
-    ElMessage.error(error.message || '导出失败')
-  }
   menuVisible.value = false
+  openExportDialog(rightClickedNode.value)
 }
 
-const handleExport = async () => {
+const handleExport = () => {
   if (!selectedNode.value || selectedNode.value.level !== 2) return
+  openExportDialog(selectedNode.value)
+}
+
+const openExportDialog = (node) => {
+  exportTargetNode.value = node
+  exportScope.value = 'all'
+  exportDialogVisible.value = true
+}
+
+const confirmExport = async () => {
+  const node = exportTargetNode.value
+  if (!node) return
+  const scope = exportScope.value
+  const scopeLabel = (exportScopeOptions.find(s => s.value === scope) || {}).label || ''
   try {
-    const assets = await exportAssets(selectedNode.value.id)
+    const assets = await exportAssets(node.id, scope)
+    if (!assets || assets.length === 0) {
+      ElMessage.warning(`路段【${node.name}】在所选范围（${scopeLabel}）内没有可导出的长凳，未生成文件`)
+      return
+    }
     const csv = convertToCSV(assets)
-    downloadCSV(csv, `路段_${selectedNode.value.name}_资产.csv`)
-    ElMessage.success('导出成功')
+    downloadCSV(csv, `路段_${node.name}_资产_${scopeLabel}.csv`)
+    ElMessage.success(`导出成功，共 ${assets.length} 条（范围：${scopeLabel}）`)
+    exportDialogVisible.value = false
   } catch (error) {
     ElMessage.error(error.message || '导出失败')
   }
@@ -442,7 +487,8 @@ const handleExport = async () => {
 const convertToCSV = (data) => {
   if (!data || data.length === 0) return ''
   const headers = Object.keys(data[0])
-  const rows = data.map(row => headers.map(header => `"${row[header] || ''}"`).join(','))
+  const escapeCell = (val) => `"${String(val ?? '').replace(/"/g, '""')}"`
+  const rows = data.map(row => headers.map(header => escapeCell(row[header])).join(','))
   return [headers.join(','), ...rows].join('\n')
 }
 

@@ -303,7 +303,20 @@ public class BenchService {
         return logs.stream().map(this::toChangeLogDTO).toList();
     }
 
-    public List<Map<String, Object>> exportBenchAssets(Long sectionId) {
+    /** 导出范围：全部（在用+停用） */
+    public static final String EXPORT_SCOPE_ALL = "all";
+    /** 导出范围：只导出在用 */
+    public static final String EXPORT_SCOPE_ACTIVE = "active";
+    /** 导出范围：只导出停用 */
+    public static final String EXPORT_SCOPE_DISABLED = "disabled";
+
+    /**
+     * 导出单一路段资产目录，支持按在用/停用/全部三种范围筛选。
+     * 每行附带点位容量、占用、剩余与停用凳数：占用/剩余与树上点位口径一致
+     * （仅统计在用长凳），停用凳单独成列不计入占用。
+     * 所选范围内没有长凳时抛出明确提示，不生成空文件。
+     */
+    public List<Map<String, Object>> exportBenchAssets(Long sectionId, String scope) {
         TreeNode section = treeNodeRepository.findByIdAndIsDeletedFalse(sectionId)
                 .orElseThrow(() -> new IllegalArgumentException("路段不存在"));
 
@@ -311,30 +324,102 @@ public class BenchService {
             throw new IllegalArgumentException("只能导出路段级别的资产");
         }
 
+        String normalizedScope = normalizeExportScope(scope);
+
         List<TreeNode> points = treeNodeRepository.findByParentIdAndIsDeletedFalse(sectionId);
+        points.sort(Comparator.comparing((TreeNode p) -> p.getSortOrder() != null ? p.getSortOrder() : 0)
+                .thenComparing(TreeNode::getId));
         List<Long> pointIds = points.stream().map(TreeNode::getId).toList();
-        List<Bench> benches = benchRepository.findByNodeIds(pointIds);
+        List<Bench> benches = pointIds.isEmpty() ? List.of() : benchRepository.findByNodeIds(pointIds);
+
+        // 与树上点位占用同一口径：仅统计在用(1)长凳
+        Map<Long, Long> occupiedMap = new HashMap<>();
+        if (!pointIds.isEmpty()) {
+            for (Object[] row : benchRepository.countActiveByNodeIds(pointIds)) {
+                occupiedMap.put((Long) row[0], (Long) row[1]);
+            }
+        }
+        Map<Long, Long> disabledMap = benches.stream()
+                .filter(b -> Integer.valueOf(Bench.STATUS_DISABLED).equals(b.getStatus()))
+                .collect(Collectors.groupingBy(Bench::getNodeId, Collectors.counting()));
+
+        Map<Long, Integer> pointOrder = new HashMap<>();
+        for (int i = 0; i < points.size(); i++) {
+            pointOrder.put(points.get(i).getId(), i);
+        }
+
+        List<Bench> scopedBenches = benches.stream()
+                .filter(b -> matchesExportScope(b, normalizedScope))
+                .sorted(Comparator.comparing((Bench b) -> pointOrder.getOrDefault(b.getNodeId(), Integer.MAX_VALUE))
+                        .thenComparing(b -> b.getCode() != null ? b.getCode() : ""))
+                .toList();
+
+        if (scopedBenches.isEmpty()) {
+            throw new IllegalArgumentException(String.format(
+                    "路段【%s】下暂无%s长凳，导出范围为空，未生成文件",
+                    section.getName(), exportScopeLabel(normalizedScope)));
+        }
 
         Map<Long, TreeNode> nodeMap = new HashMap<>();
         nodeMap.put(sectionId, section);
         points.forEach(p -> nodeMap.put(p.getId(), p));
 
         List<Map<String, Object>> assets = new ArrayList<>();
-        for (Bench bench : benches) {
+        for (Bench bench : scopedBenches) {
             TreeNode point = nodeMap.get(bench.getNodeId());
+            int capacity = point != null && point.getCapacity() != null
+                    ? point.getCapacity() : TreeNode.DEFAULT_CAPACITY;
+            long occupied = occupiedMap.getOrDefault(bench.getNodeId(), 0L);
+            long disabled = disabledMap.getOrDefault(bench.getNodeId(), 0L);
+
             Map<String, Object> asset = new LinkedHashMap<>();
             asset.put("长凳编号", bench.getCode());
             asset.put("材质", bench.getMaterial());
             asset.put("长度(cm)", bench.getLength());
             asset.put("宽度(cm)", bench.getWidth());
             asset.put("高度(cm)", bench.getHeight());
+            asset.put("状态", Integer.valueOf(Bench.STATUS_NORMAL).equals(bench.getStatus()) ? "在用" : "停用");
             asset.put("所属街区", section.getParentId() != null ? getNodeName(section.getParentId()) : "");
             asset.put("所属路段", section.getName());
             asset.put("所属点位", point != null ? point.getName() : "");
+            asset.put("点位容量", capacity);
+            asset.put("点位占用(在用)", occupied);
+            asset.put("点位剩余", Math.max(0, capacity - occupied));
+            asset.put("点位停用凳数", disabled);
             asset.put("创建时间", bench.getCreatedAt());
             assets.add(asset);
         }
         return assets;
+    }
+
+    private String normalizeExportScope(String scope) {
+        if (scope == null || scope.isBlank()) {
+            return EXPORT_SCOPE_ALL;
+        }
+        String normalized = scope.trim().toLowerCase();
+        if (!normalized.equals(EXPORT_SCOPE_ALL)
+                && !normalized.equals(EXPORT_SCOPE_ACTIVE)
+                && !normalized.equals(EXPORT_SCOPE_DISABLED)) {
+            throw new IllegalArgumentException(
+                    "无效的导出范围：" + scope + "，仅支持 all（全部）/active（在用）/disabled（停用）");
+        }
+        return normalized;
+    }
+
+    private boolean matchesExportScope(Bench bench, String scope) {
+        return switch (scope) {
+            case EXPORT_SCOPE_ACTIVE -> Integer.valueOf(Bench.STATUS_NORMAL).equals(bench.getStatus());
+            case EXPORT_SCOPE_DISABLED -> Integer.valueOf(Bench.STATUS_DISABLED).equals(bench.getStatus());
+            default -> true;
+        };
+    }
+
+    private String exportScopeLabel(String scope) {
+        return switch (scope) {
+            case EXPORT_SCOPE_ACTIVE -> "在用";
+            case EXPORT_SCOPE_DISABLED -> "停用";
+            default -> "";
+        };
     }
 
     private TreeNode validateNodeLevel3(Long nodeId) {

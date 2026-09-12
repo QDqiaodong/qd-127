@@ -203,6 +203,39 @@ CREATE TABLE IF NOT EXISTS point_lighting_inspection (
     CONSTRAINT fk_lighting_point FOREIGN KEY (point_id) REFERENCES tree_node(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='点位夜间照明巡查记录表';
 
+CREATE TABLE IF NOT EXISTS additional_bench_plan (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    district_id BIGINT NOT NULL COMMENT '所属街区ID(level=1)',
+    section_id BIGINT NOT NULL COMMENT '投放路段ID(level=2)',
+    plan_date DATE NOT NULL COMMENT '计划投放日期',
+    bench_count INT NOT NULL COMMENT '计划加凳数量',
+    verified_count INT NOT NULL DEFAULT 0 COMMENT '已核销投放数量',
+    status TINYINT NOT NULL DEFAULT 1 COMMENT '状态：1-待投放，2-已投放(逾期按计划日期动态推导)',
+    remark VARCHAR(500) COMMENT '备注',
+    last_verified_by VARCHAR(50) COMMENT '最近核销操作人',
+    last_verified_at DATETIME NULL COMMENT '最近核销时间',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_section_plan_date (section_id, plan_date),
+    INDEX idx_status (status),
+    CONSTRAINT fk_add_plan_district FOREIGN KEY (district_id) REFERENCES tree_node(id),
+    CONSTRAINT fk_add_plan_section FOREIGN KEY (section_id) REFERENCES tree_node(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='节假日临时加凳预案表';
+
+CREATE TABLE IF NOT EXISTS additional_bench_plan_log (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    plan_id BIGINT NOT NULL COMMENT '加凳预案ID',
+    verified_count INT NOT NULL COMMENT '本次核销数量',
+    before_count INT NOT NULL COMMENT '核销前累计数量',
+    after_count INT NOT NULL COMMENT '核销后累计数量',
+    operator VARCHAR(50) NOT NULL COMMENT '核销操作人',
+    remark VARCHAR(500) COMMENT '核销备注',
+    verified_at DATETIME NOT NULL COMMENT '核销时间',
+    INDEX idx_plan_id (plan_id),
+    INDEX idx_verified_at (verified_at),
+    CONSTRAINT fk_add_plan_log_plan FOREIGN KEY (plan_id) REFERENCES additional_bench_plan(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='加凳投放核销记录表';
+
 INSERT INTO tree_node (parent_id, level, name, sort_order, capacity) VALUES
 (NULL, 1, '商业步行街A区', 1, NULL),
 (NULL, 1, '商业步行街B区', 2, NULL),

@@ -87,6 +87,12 @@ public class TreeNodeDTO {
     /** 路段下将满点位数（仅路段 level=2 有效） */
     private Integer capacityNearlyFullCount;
 
+    /** 路段待投放加凳数量（含逾期未投放，仅路段 level=2 有效） */
+    private Long additionalBenchPendingCount;
+
+    /** 路段下逾期且仍未完全投放的加凳预案数（仅路段 level=2 有效） */
+    private Integer additionalBenchOverduePlanCount;
+
     private List<TreeNodeDTO> children;
 
     private String path;

@@ -38,6 +38,7 @@ public class TreeNodeService {
     private final NodeCapacityLogRepository capacityLogRepository;
     private final NodeClosureLogRepository closureLogRepository;
     private final PointLightingInspectionRepository lightingInspectionRepository;
+    private final AdditionalBenchPlanService additionalBenchPlanService;
 
     public List<TreeNodeDTO> getTree() {
         List<TreeNode> allNodes = treeNodeRepository.findAllActiveNodes();
@@ -65,6 +66,7 @@ public class TreeNodeService {
         fillPointStatus(pointDtos);
         fillSectionLightingAbnormalCount(nodeMap.values());
         fillSectionCapacityAlarm(nodeMap.values());
+        fillSectionAdditionalBenchPlans(nodeMap.values());
 
         rootNodes.sort((a, b) -> Integer.compare(a.getSortOrder(), b.getSortOrder()));
         for (TreeNodeDTO node : nodeMap.values()) {
@@ -83,6 +85,7 @@ public class TreeNodeService {
         if (level == 2) {
             fillSectionLightingAbnormalCountByQuery(dtos);
             fillSectionCapacityAlarmByQuery(dtos);
+            fillSectionAdditionalBenchPlans(dtos);
         }
         return dtos;
     }
@@ -98,6 +101,7 @@ public class TreeNodeService {
         if (!sectionDtos.isEmpty()) {
             fillSectionLightingAbnormalCountByQuery(sectionDtos);
             fillSectionCapacityAlarmByQuery(sectionDtos);
+            fillSectionAdditionalBenchPlans(sectionDtos);
         }
         return dtos;
     }
@@ -437,6 +441,10 @@ public class TreeNodeService {
             }
         }
 
+        if (node.getLevel() == 2) {
+            additionalBenchPlanService.validateSectionCanDelete(id);
+        }
+
         if (node.getLevel() == 3) {
             long occupied = benchRepository.countByNodeId(id);
             if (occupied > 0) {
@@ -668,6 +676,35 @@ public class TreeNodeService {
                 && remainingSum < TreeNode.SECTION_CAPACITY_ALARM_THRESHOLD);
         section.setCapacityFullCount(fullCount);
         section.setCapacityNearlyFullCount(nearlyFullCount);
+    }
+
+    /**
+     * 批量填充路段加凳待投放数量与逾期预案数；街区树标记和加凳预案列表共用同一服务口径。
+     */
+    private void fillSectionAdditionalBenchPlans(java.util.Collection<TreeNodeDTO> nodes) {
+        if (nodes == null || nodes.isEmpty()) {
+            return;
+        }
+        List<Long> sectionIds = nodes.stream()
+                .filter(node -> node.getLevel() != null && node.getLevel() == 2)
+                .map(TreeNodeDTO::getId)
+                .toList();
+        if (sectionIds.isEmpty()) {
+            return;
+        }
+        Map<Long, SectionAdditionalBenchSummaryDTO> summaries =
+                additionalBenchPlanService.getSectionSummaries(sectionIds);
+        if (summaries == null) {
+            return;
+        }
+        summaries.forEach((sectionId, summary) ->
+                nodes.stream()
+                        .filter(node -> sectionId.equals(node.getId()))
+                        .findFirst()
+                        .ifPresent(node -> {
+                            node.setAdditionalBenchPendingCount(summary.getPendingCount());
+                            node.setAdditionalBenchOverduePlanCount(summary.getOverduePlanCount().intValue());
+                        }));
     }
 
     /**

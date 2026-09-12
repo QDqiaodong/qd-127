@@ -36,6 +36,8 @@ class TreeNodeServiceLightingTest {
     private NodeClosureLogRepository closureLogRepository;
     @Mock
     private PointLightingInspectionRepository lightingInspectionRepository;
+    @Mock
+    private AdditionalBenchPlanService additionalBenchPlanService;
 
     @InjectMocks
     private TreeNodeService treeNodeService;

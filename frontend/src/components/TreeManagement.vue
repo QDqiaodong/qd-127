@@ -13,6 +13,14 @@
             >
               容量告警 {{ capacityAlarmSectionCount }} 处
             </el-tag>
+            <el-tag
+              v-if="additionalBenchOverdueSectionCount > 0"
+              type="danger"
+              effect="dark"
+              class="alarm-count-tag"
+            >
+              加凳逾期 {{ additionalBenchOverdueSectionCount }} 处
+            </el-tag>
             <el-button type="primary" @click="handleAdd">
               <el-icon><Plus /></el-icon>
               添加节点
@@ -59,6 +67,18 @@
                 @click.stop="openSectionCapacityAlarm(data)"
               >
                 容量告警·余{{ data.capacityRemainingSum }}
+              </el-tag>
+              <el-tag
+                v-if="data.level === 2 && data.additionalBenchPendingCount > 0"
+                size="small"
+                :type="data.additionalBenchOverduePlanCount > 0 ? 'danger' : 'warning'"
+                effect="plain"
+                class="capacity-tag additional-bench-tag"
+              >
+                待加凳 {{ data.additionalBenchPendingCount }}
+                <template v-if="data.additionalBenchOverduePlanCount > 0">
+                  ·逾期{{ data.additionalBenchOverduePlanCount }}
+                </template>
               </el-tag>
               <el-tag
                 v-if="data.level === 3"
@@ -396,6 +416,19 @@ const capacityAlarmSectionCount = computed(() => {
   const walk = (nodes) => {
     nodes.forEach(node => {
       if (node.level === 2 && node.capacityAlarm) count++
+      if (node.children && node.children.length > 0) walk(node.children)
+    })
+  }
+  walk(treeData.value)
+  return count
+})
+
+// 有加凳逾期预案的路段数：直接统计街区树返回字段，和路段待加凳标记同源
+const additionalBenchOverdueSectionCount = computed(() => {
+  let count = 0
+  const walk = (nodes) => {
+    nodes.forEach(node => {
+      if (node.level === 2 && node.additionalBenchOverduePlanCount > 0) count++
       if (node.children && node.children.length > 0) walk(node.children)
     })
   }

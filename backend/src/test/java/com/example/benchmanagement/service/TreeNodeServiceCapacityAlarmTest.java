@@ -74,7 +74,7 @@ class TreeNodeServiceCapacityAlarmTest {
         when(treeNodeRepository.findByIdsAndIsDeletedFalse(List.of(30L, 31L, 32L)))
                 .thenReturn(List.of(pointA, pointB, pointC));
         when(benchRepository.countActiveByNodeIds(List.of(30L, 31L, 32L)))
-                .thenReturn(List.of(occupiedRow(30L, 2L), occupiedRow(31L, 5L)));
+                .thenReturn(List.<Object[]>of(occupiedRow(30L, 2L), occupiedRow(31L, 5L)));
         when(lightingInspectionRepository.findByPointIdInOrderByInspectedAtDescIdDesc(List.of(30L, 31L, 32L)))
                 .thenReturn(List.of());
 
@@ -124,7 +124,7 @@ class TreeNodeServiceCapacityAlarmTest {
         when(treeNodeRepository.findByIdsAndIsDeletedFalse(List.of(30L, 31L)))
                 .thenReturn(List.of(pointA, pointB));
         when(benchRepository.countActiveByNodeIds(List.of(30L, 31L)))
-                .thenReturn(List.of(occupiedRow(30L, 1L)));
+                .thenReturn(List.<Object[]>of(occupiedRow(30L, 1L)));
         when(lightingInspectionRepository.findByPointIdInOrderByInspectedAtDescIdDesc(List.of(30L, 31L)))
                 .thenReturn(List.of());
 
@@ -152,7 +152,7 @@ class TreeNodeServiceCapacityAlarmTest {
                 .thenReturn(List.of(pointA, pointB, pointC));
         // 点位A余0（已满）、点位B余1（将满）、点位C余4（充足，不进明细）
         when(benchRepository.countActiveByNodeIds(List.of(30L, 31L, 32L)))
-                .thenReturn(List.of(occupiedRow(30L, 2L), occupiedRow(31L, 9L)));
+                .thenReturn(List.<Object[]>of(occupiedRow(30L, 2L), occupiedRow(31L, 9L)));
 
         SectionCapacityAlarmDTO detail = treeNodeService.getSectionCapacityAlarm(20L);
 

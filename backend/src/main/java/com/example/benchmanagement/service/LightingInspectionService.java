@@ -29,9 +29,10 @@ public class LightingInspectionService {
 
     private final PointLightingInspectionRepository lightingRepository;
     private final TreeNodeRepository treeNodeRepository;
+    private final TreeNodeService treeNodeService;
 
     /**
-     * 登记点位夜间照明巡查：点位必选，异常时必须点名缺灯或损坏。
+     * 登记点位夜间照明巡查：点位必选，异常时必须点名缺灯或损坏；封闭点位禁止登记。
      */
     @Transactional
     public LightingInspectionDTO createInspection(LightingInspectionCreateRequest request) {
@@ -43,6 +44,7 @@ public class LightingInspectionService {
         if (point.getLevel() != 3) {
             throw new IllegalArgumentException("照明巡查只能登记到点位(level=3)，请重新选择");
         }
+        assertPointNotClosed(point);
 
         if (request.getInspectedAt() == null) {
             throw new IllegalArgumentException("巡查时间不能为空");
@@ -188,6 +190,18 @@ public class LightingInspectionService {
             throw new IllegalArgumentException("只有点位(level=3)有照明巡查记录");
         }
         return point;
+    }
+
+    /**
+     * 封闭期内禁止往该点位登记照明巡查，到期或人工解封后恢复。
+     */
+    private void assertPointNotClosed(TreeNode point) {
+        if (treeNodeService.isPointClosed(point.getId())) {
+            String endAt = point.getClosedEndAt() != null ? point.getClosedEndAt().toString() : "未设置";
+            throw new IllegalStateException(String.format(
+                    "点位【%s】处于临时封闭期（截止%s），封闭期内禁止登记照明巡查，到期或人工解封后恢复",
+                    point.getName(), endAt));
+        }
     }
 
     private String pointNameOf(Long pointId) {

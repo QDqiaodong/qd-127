@@ -30,6 +30,8 @@ class LightingInspectionServiceTest {
     private PointLightingInspectionRepository lightingRepository;
     @Mock
     private TreeNodeRepository treeNodeRepository;
+    @Mock
+    private TreeNodeService treeNodeService;
 
     @InjectMocks
     private LightingInspectionService lightingInspectionService;
@@ -84,6 +86,22 @@ class LightingInspectionServiceTest {
                 () -> lightingInspectionService.createInspection(request));
         assertTrue(ex.getMessage().contains("点位"));
         verifyNoInteractions(lightingRepository);
+    }
+
+    @Test
+    void createOnClosedPoint_throws() {
+        stubPointHierarchy();
+        pointA.setClosed(1);
+        pointA.setClosedStartAt(LocalDateTime.now().minusHours(1));
+        pointA.setClosedEndAt(LocalDateTime.now().plusDays(1));
+        when(treeNodeService.isPointClosed(30L)).thenReturn(true);
+        LightingInspectionCreateRequest request = intactRequest();
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> lightingInspectionService.createInspection(request));
+        assertTrue(ex.getMessage().contains("封闭"));
+        assertTrue(ex.getMessage().contains("点位A"));
+        verify(lightingRepository, never()).save(any());
     }
 
     @Test

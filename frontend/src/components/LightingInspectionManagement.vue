@@ -84,7 +84,7 @@
             </el-table-column>
             <el-table-column label="操作" width="150" fixed="right">
               <template #default="{ row }">
-                <el-button size="small" type="primary" @click="openCreateDialog(row)">登记</el-button>
+                <el-button size="small" type="primary" :disabled="!!pointClosedMap[row.pointId]" @click="openCreateDialog(row)">登记</el-button>
                 <el-button size="small" link type="primary" @click="openPointDetail(row)">详情</el-button>
               </template>
             </el-table-column>
@@ -159,7 +159,13 @@
         </el-form-item>
         <el-form-item label="点位" required>
           <el-select v-model="createForm.pointId" placeholder="请选择点位（必选）" style="width: 100%" :disabled="!createForm.sectionId">
-            <el-option v-for="p in createPoints" :key="p.id" :value="p.id" :label="p.name" />
+            <el-option
+              v-for="p in createPoints"
+              :key="p.id"
+              :value="p.id"
+              :label="p.closed ? `${p.name}（封闭中）` : p.name"
+              :disabled="!!p.closed"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="巡查时间" required>
@@ -271,6 +277,33 @@ const sectionMap = ref({})
 const pointMap = ref({})
 // 点位 -> 所属路段/街区，用于按上级范围筛选
 const pointParentMap = ref({})
+// 点位 -> 是否封闭中，封闭点位禁止登记照明巡查
+const pointClosedMap = ref({})
+
+const loadTreeData = async () => {
+  const tree = await getTree()
+  districts.value = tree
+  const sm = {}
+  const pm = {}
+  const parent = {}
+  const closed = {}
+  tree.forEach(d => {
+    d.children?.forEach(s => {
+      sm[d.id] = sm[d.id] || []
+      sm[d.id].push(s)
+      s.children?.forEach(p => {
+        pm[s.id] = pm[s.id] || []
+        pm[s.id].push(p)
+        parent[p.id] = { sectionId: s.id, districtId: d.id }
+        closed[p.id] = !!p.closed
+      })
+    })
+  })
+  sectionMap.value = sm
+  pointMap.value = pm
+  pointParentMap.value = parent
+  pointClosedMap.value = closed
+}
 
 // 点位照明状态
 const statuses = ref([])
@@ -313,28 +346,6 @@ const createPoints = ref([])
 const detailDialogVisible = ref(false)
 const detailStatus = ref(null)
 const detailRecords = ref([])
-
-const loadTreeData = async () => {
-  const tree = await getTree()
-  districts.value = tree
-  const sm = {}
-  const pm = {}
-  const parent = {}
-  tree.forEach(d => {
-    d.children?.forEach(s => {
-      sm[d.id] = sm[d.id] || []
-      sm[d.id].push(s)
-      s.children?.forEach(p => {
-        pm[s.id] = pm[s.id] || []
-        pm[s.id].push(p)
-        parent[p.id] = { sectionId: s.id, districtId: d.id }
-      })
-    })
-  })
-  sectionMap.value = sm
-  pointMap.value = pm
-  pointParentMap.value = parent
-}
 
 // ============ 点位照明状态 ============
 const loadStatuses = async () => {
@@ -474,6 +485,10 @@ const handleSubmit = async () => {
   const form = createForm.value
   if (!form.pointId) {
     ElMessage.warning('请先选择点位，没有点位不能提交')
+    return
+  }
+  if (pointClosedMap.value[form.pointId]) {
+    ElMessage.warning('该点位处于临时封闭期，封闭期内禁止登记照明巡查')
     return
   }
   if (!form.inspectedAt) {

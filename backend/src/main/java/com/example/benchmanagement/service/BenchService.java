@@ -326,7 +326,7 @@ public class BenchService {
 
         String normalizedScope = normalizeExportScope(scope);
 
-        List<TreeNode> points = treeNodeRepository.findByParentIdAndIsDeletedFalse(sectionId);
+        List<TreeNode> points = new ArrayList<>(treeNodeRepository.findByParentIdAndIsDeletedFalse(sectionId));
         points.sort(Comparator.comparing((TreeNode p) -> p.getSortOrder() != null ? p.getSortOrder() : 0)
                 .thenComparing(TreeNode::getId));
         List<Long> pointIds = points.stream().map(TreeNode::getId).toList();

@@ -54,6 +54,15 @@ public class TreeNodeDTO {
     /** 封闭原因 */
     private String closedReason;
 
+    /** 最近一次夜间照明结论：1-完好，0-异常，null-未巡查（仅点位 level=3 有效） */
+    private Integer lightingResult;
+
+    /** 最近一次照明异常类型：缺灯/损坏（仅点位 level=3 有效） */
+    private String lightingProblemType;
+
+    /** 最近一次照明巡查时间（仅点位 level=3 有效） */
+    private java.time.LocalDateTime lightingInspectedAt;
+
     private List<TreeNodeDTO> children;
 
     private String path;

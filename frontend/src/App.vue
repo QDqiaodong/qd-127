@@ -18,6 +18,10 @@
             <el-icon><Tools /></el-icon>
             <span>巡检与维修管理</span>
           </el-menu-item>
+          <el-menu-item index="lighting">
+            <el-icon><Moon /></el-icon>
+            <span>夜间照明巡查</span>
+          </el-menu-item>
           <el-menu-item index="plan">
             <el-icon><Calendar /></el-icon>
             <span>巡检计划与任务</span>
@@ -32,6 +36,7 @@
         <TreeManagement v-if="activeMenu === 'tree'" />
         <BenchManagement v-else-if="activeMenu === 'bench'" />
         <InspectionManagement v-else-if="activeMenu === 'inspection'" />
+        <LightingInspectionManagement v-else-if="activeMenu === 'lighting'" />
         <InspectionPlanManagement v-else-if="activeMenu === 'plan'" />
         <ChangeLogManagement v-else-if="activeMenu === 'change'" />
       </el-main>
@@ -41,10 +46,11 @@
 
 <script setup>
 import { ref } from 'vue'
-import { Menu, Box, RefreshRight, Tools, Calendar } from '@element-plus/icons-vue'
+import { Menu, Box, RefreshRight, Tools, Calendar, Moon } from '@element-plus/icons-vue'
 import TreeManagement from './components/TreeManagement.vue'
 import BenchManagement from './components/BenchManagement.vue'
 import InspectionManagement from './components/InspectionManagement.vue'
+import LightingInspectionManagement from './components/LightingInspectionManagement.vue'
 import InspectionPlanManagement from './components/InspectionPlanManagement.vue'
 import ChangeLogManagement from './components/ChangeLogManagement.vue'
 

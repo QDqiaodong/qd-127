@@ -187,6 +187,22 @@ CREATE TABLE IF NOT EXISTS repair_order (
     CONSTRAINT fk_repair_inspection FOREIGN KEY (inspection_id) REFERENCES bench_inspection(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='长凳维修工单表';
 
+CREATE TABLE IF NOT EXISTS point_lighting_inspection (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    point_id BIGINT NOT NULL COMMENT '点位ID(level=3)',
+    inspected_at DATETIME NOT NULL COMMENT '巡查时间',
+    result TINYINT NOT NULL COMMENT '照明结论：1-完好，0-异常',
+    lamp_count INT NOT NULL DEFAULT 0 COMMENT '灯具数量',
+    problem_type VARCHAR(20) COMMENT '异常类型：缺灯/损坏(仅异常时填写)',
+    description VARCHAR(1000) COMMENT '问题描述',
+    inspector VARCHAR(50) NOT NULL COMMENT '巡查人',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_point_id (point_id),
+    INDEX idx_inspected_at (inspected_at),
+    CONSTRAINT fk_lighting_point FOREIGN KEY (point_id) REFERENCES tree_node(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='点位夜间照明巡查记录表';
+
 INSERT INTO tree_node (parent_id, level, name, sort_order, capacity) VALUES
 (NULL, 1, '商业步行街A区', 1, NULL),
 (NULL, 1, '商业步行街B区', 2, NULL),

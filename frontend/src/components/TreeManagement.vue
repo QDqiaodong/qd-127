@@ -49,6 +49,33 @@
               >
                 封闭中
               </el-tag>
+              <el-tag
+                v-if="data.level === 3 && data.lightingResult === 1"
+                size="small"
+                type="success"
+                effect="plain"
+                class="capacity-tag"
+              >
+                照明完好
+              </el-tag>
+              <el-tag
+                v-else-if="data.level === 3 && data.lightingResult === 0"
+                size="small"
+                type="danger"
+                effect="plain"
+                class="capacity-tag"
+              >
+                照明异常·{{ data.lightingProblemType || '异常' }}
+              </el-tag>
+              <el-tag
+                v-else-if="data.level === 3"
+                size="small"
+                type="info"
+                effect="plain"
+                class="capacity-tag"
+              >
+                照明未巡查
+              </el-tag>
             </span>
           </template>
         </el-tree>

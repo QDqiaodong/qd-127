@@ -8,10 +8,12 @@ import com.example.benchmanagement.dto.PointReopenRequest;
 import com.example.benchmanagement.dto.TreeNodeDTO;
 import com.example.benchmanagement.entity.NodeCapacityLog;
 import com.example.benchmanagement.entity.NodeClosureLog;
+import com.example.benchmanagement.entity.PointLightingInspection;
 import com.example.benchmanagement.entity.TreeNode;
 import com.example.benchmanagement.repository.BenchRepository;
 import com.example.benchmanagement.repository.NodeCapacityLogRepository;
 import com.example.benchmanagement.repository.NodeClosureLogRepository;
+import com.example.benchmanagement.repository.PointLightingInspectionRepository;
 import com.example.benchmanagement.repository.TreeNodeRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -33,6 +35,7 @@ public class TreeNodeService {
     private final BenchRepository benchRepository;
     private final NodeCapacityLogRepository capacityLogRepository;
     private final NodeClosureLogRepository closureLogRepository;
+    private final PointLightingInspectionRepository lightingInspectionRepository;
 
     public List<TreeNodeDTO> getTree() {
         List<TreeNode> allNodes = treeNodeRepository.findAllActiveNodes();
@@ -57,7 +60,7 @@ public class TreeNodeService {
             }
         }
 
-        fillCapacityStatus(pointDtos);
+        fillPointStatus(pointDtos);
 
         rootNodes.sort((a, b) -> Integer.compare(a.getSortOrder(), b.getSortOrder()));
         for (TreeNodeDTO node : nodeMap.values()) {
@@ -71,7 +74,7 @@ public class TreeNodeService {
         List<TreeNode> nodes = treeNodeRepository.findByLevelAndIsDeletedFalse(level);
         List<TreeNodeDTO> dtos = nodes.stream().map(this::toDTO).toList();
         if (level == 3) {
-            fillCapacityStatus(dtos);
+            fillPointStatus(dtos);
         }
         return dtos;
     }
@@ -81,7 +84,7 @@ public class TreeNodeService {
         List<TreeNodeDTO> dtos = nodes.stream().map(this::toDTO).toList();
         List<TreeNodeDTO> pointDtos = dtos.stream().filter(d -> d.getLevel() == 3).toList();
         if (!pointDtos.isEmpty()) {
-            fillCapacityStatus(pointDtos);
+            fillPointStatus(pointDtos);
         }
         return dtos;
     }
@@ -459,6 +462,14 @@ public class TreeNodeService {
     }
 
     /**
+     * 批量填充点位的占用/容量/封闭状态及最近一次夜间照明结论。
+     */
+    private void fillPointStatus(List<TreeNodeDTO> points) {
+        fillCapacityStatus(points);
+        fillLightingStatus(points);
+    }
+
+    /**
      * 批量填充点位的占用数、剩余数、有效容量及封闭状态。
      */
     private void fillCapacityStatus(List<TreeNodeDTO> points) {
@@ -491,6 +502,29 @@ public class TreeNodeService {
         }
     }
 
+    /**
+     * 批量填充点位最近一次夜间照明结论（树标记与照明巡查记录同源，刷新后保持一致）。
+     */
+    private void fillLightingStatus(List<TreeNodeDTO> points) {
+        if (points == null || points.isEmpty()) {
+            return;
+        }
+        List<Long> pointIds = points.stream().map(TreeNodeDTO::getId).toList();
+        Map<Long, PointLightingInspection> latestMap = new HashMap<>();
+        for (PointLightingInspection inspection
+                : lightingInspectionRepository.findByPointIdInOrderByInspectedAtDescIdDesc(pointIds)) {
+            latestMap.putIfAbsent(inspection.getPointId(), inspection);
+        }
+        for (TreeNodeDTO point : points) {
+            PointLightingInspection latest = latestMap.get(point.getId());
+            if (latest != null) {
+                point.setLightingResult(latest.getResult());
+                point.setLightingProblemType(latest.getProblemType());
+                point.setLightingInspectedAt(latest.getInspectedAt());
+            }
+        }
+    }
+
     private TreeNodeDTO toDTO(TreeNode node) {
         return TreeNodeDTO.builder()
                 .id(node.getId())
@@ -512,7 +546,7 @@ public class TreeNodeService {
     private TreeNodeDTO toDTOWithCapacity(TreeNode node) {
         TreeNodeDTO dto = toDTO(node);
         if (node.getLevel() == 3) {
-            fillCapacityStatus(List.of(dto));
+            fillPointStatus(List.of(dto));
         }
         return dto;
     }

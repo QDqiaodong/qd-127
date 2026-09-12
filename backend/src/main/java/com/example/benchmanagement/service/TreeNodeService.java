@@ -5,6 +5,7 @@ import com.example.benchmanagement.dto.NodeCapacityLogDTO;
 import com.example.benchmanagement.dto.NodeClosureLogDTO;
 import com.example.benchmanagement.dto.PointClosureRequest;
 import com.example.benchmanagement.dto.PointReopenRequest;
+import com.example.benchmanagement.dto.SectionAdditionalBenchSummaryDTO;
 import com.example.benchmanagement.dto.SectionCapacityAlarmDTO;
 import com.example.benchmanagement.dto.TreeNodeDTO;
 import com.example.benchmanagement.entity.NodeCapacityLog;

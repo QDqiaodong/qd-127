@@ -601,7 +601,8 @@ public class TreeNodeService {
 
     /**
      * 填充路段的容量告警：直接汇总树上已填充的点位剩余容量，
-     * 保证路段告警标记与点位容量标记同源一致。没有点位的路段不出告警。
+     * 保证路段告警标记与点位容量标记同源一致。
+     * 没有点位、或没有已满/将满点位的路段不出告警。
      */
     private void fillSectionCapacityAlarm(java.util.Collection<TreeNodeDTO> nodes) {
         for (TreeNodeDTO node : nodes) {
@@ -635,7 +636,9 @@ public class TreeNodeService {
     }
 
     /**
-     * 路段容量告警统一口径：剩余容量加总低于阈值即告警；没有点位的路段不出告警。
+     * 路段容量告警统一口径：有点位、剩余容量加总低于阈值且至少存在一个已满/将满点位时才告警。
+     * 没有点位，或加总虽低于阈值但各点位均为充足状态的路段不出告警，
+     * 保证树上告警标记点开后一定能在下钻的已满/将满名单中对上点位。
      */
     private void applySectionCapacityStats(TreeNodeDTO section, List<TreeNodeDTO> points) {
         section.setCapacityAlarmThreshold(TreeNode.SECTION_CAPACITY_ALARM_THRESHOLD);
@@ -659,14 +662,17 @@ public class TreeNodeService {
             }
         }
         section.setCapacityRemainingSum(remainingSum);
-        section.setCapacityAlarm(remainingSum < TreeNode.SECTION_CAPACITY_ALARM_THRESHOLD);
+        // 必须存在已满/将满点位才告警，否则会出现"路段有告警标记、下钻名单却为空"
+        boolean hasFullOrNearlyFullPoint = fullCount + nearlyFullCount > 0;
+        section.setCapacityAlarm(hasFullOrNearlyFullPoint
+                && remainingSum < TreeNode.SECTION_CAPACITY_ALARM_THRESHOLD);
         section.setCapacityFullCount(fullCount);
         section.setCapacityNearlyFullCount(nearlyFullCount);
     }
 
     /**
      * 路段容量告警下钻详情：剩余容量加总、生效阈值及已满/将满点位明细，
-     * 与树上路段告警标记同源。
+     * 与树上路段告警标记同源；alarm 为 true 时明细列表必非空。
      */
     public SectionCapacityAlarmDTO getSectionCapacityAlarm(Long sectionId) {
         TreeNode section = treeNodeRepository.findByIdAndIsDeletedFalse(sectionId)

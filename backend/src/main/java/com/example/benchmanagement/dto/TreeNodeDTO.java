@@ -72,7 +72,10 @@ public class TreeNodeDTO {
     /** 路段下各点位剩余容量加总（仅路段 level=2 有效；没有点位时为 null） */
     private Long capacityRemainingSum;
 
-    /** 路段容量告警：有点位且剩余容量加总低于阈值（仅路段 level=2 有效，没有点位时恒为 false） */
+    /**
+     * 路段容量告警：有点位、剩余容量加总低于阈值且至少存在一个已满/将满点位
+     * （仅路段 level=2 有效；没有点位或没有已满/将满点位时恒为 false，保证下钻名单非空）
+     */
     private Boolean capacityAlarm;
 
     /** 路段容量告警生效阈值（仅路段 level=2 有效，与告警判断同源） */

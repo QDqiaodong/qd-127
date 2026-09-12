@@ -27,7 +27,7 @@ public class SectionCapacityAlarmDTO {
     /** 路段下各点位剩余容量加总（没有点位时为 null） */
     private Long remainingSum;
 
-    /** 是否告警（没有点位的路段恒为 false） */
+    /** 是否告警（没有点位、或没有已满/将满点位的路段恒为 false；为 true 时 points 必非空） */
     private Boolean alarm;
 
     /** 已满点位数 */

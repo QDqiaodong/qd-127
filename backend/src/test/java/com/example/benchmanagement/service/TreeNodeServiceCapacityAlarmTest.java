@@ -21,8 +21,8 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.when;
 
 /**
- * 街区树路段容量告警：路段下各点位剩余容量加总低于阈值即告警，
- * 告警标记、已满/将满点位与点位容量标记同源；没有点位的路段不出告警。
+ * 街区树路段容量告警：路段下各点位剩余容量加总低于阈值且存在已满/将满点位时才告警，
+ * 告警标记、已满/将满点位与点位容量标记同源；没有点位、或没有已满/将满点位的路段不出告警。
  */
 @ExtendWith(MockitoExtension.class)
 class TreeNodeServiceCapacityAlarmTest {
@@ -169,6 +169,65 @@ class TreeNodeServiceCapacityAlarmTest {
         assertEquals(TreeNode.CAPACITY_STATUS_FULL, detail.getPoints().get(0).getCapacityStatus());
         assertEquals(31L, detail.getPoints().get(1).getId());
         assertEquals(TreeNode.CAPACITY_STATUS_NEARLY_FULL, detail.getPoints().get(1).getCapacityStatus());
+    }
+
+    @Test
+    void tree_belowThresholdButNoFullOrNearlyFullPoint_noAlarm() {
+        // 复现：小容量点位占用少时，剩余加总低于阈值，但各点位均为充足状态
+        // （如容量8的点位余7、容量6的点位余5，加总12不触发；容量8余7单点位加总7<10）
+        TreeNode district = district();
+        // 路段A：单个点位容量8、在用1、余7，加总7 < 阈值10，但没有已满/将满点位 → 不告警
+        TreeNode sectionA = section(20L, "支路二", 0);
+        TreeNode pointA = point(30L, 20L, "点位A", 0, 8);
+        // 路段B：两个点位均余3+4=7 < 10，但都不将满 → 不告警
+        TreeNode sectionB = section(21L, "支路三", 1);
+        TreeNode pointB = point(31L, 21L, "点位B", 0, 6);
+        TreeNode pointC = point(32L, 21L, "点位C", 1, 5);
+
+        when(treeNodeRepository.findAllActiveNodes())
+                .thenReturn(List.of(district, sectionA, sectionB, pointA, pointB, pointC));
+        when(treeNodeRepository.findByIdsAndIsDeletedFalse(List.of(30L, 31L, 32L)))
+                .thenReturn(List.of(pointA, pointB, pointC));
+        when(benchRepository.countActiveByNodeIds(List.of(30L, 31L, 32L)))
+                .thenReturn(List.<Object[]>of(occupiedRow(30L, 1L), occupiedRow(31L, 3L), occupiedRow(32L, 1L)));
+        when(lightingInspectionRepository.findByPointIdInOrderByInspectedAtDescIdDesc(List.of(30L, 31L, 32L)))
+                .thenReturn(List.of());
+
+        List<TreeNodeDTO> tree = treeNodeService.getTree();
+
+        TreeNodeDTO sectionADto = tree.get(0).getChildren().get(0);
+        assertEquals(7L, sectionADto.getCapacityRemainingSum());
+        assertFalse(sectionADto.getCapacityAlarm());
+        assertEquals(0, sectionADto.getCapacityFullCount());
+        assertEquals(0, sectionADto.getCapacityNearlyFullCount());
+
+        TreeNodeDTO sectionBDto = tree.get(0).getChildren().get(1);
+        assertEquals(7L, sectionBDto.getCapacityRemainingSum());
+        assertFalse(sectionBDto.getCapacityAlarm());
+    }
+
+    @Test
+    void drillDown_belowThresholdButNoFullOrNearlyFullPoint_noAlarmAndEmptyList() {
+        // 加总低于阈值但各点位均充足：不告警，下钻明细为空，保证告警标记与名单对得上
+        TreeNode sectionA = section(20L, "支路二", 0);
+        TreeNode pointA = point(30L, 20L, "点位A", 0, 8);
+
+        when(treeNodeRepository.findByIdAndIsDeletedFalse(20L)).thenReturn(Optional.of(sectionA));
+        when(treeNodeRepository.findByParentIdAndIsDeletedFalse(20L))
+                .thenReturn(List.of(pointA));
+        when(treeNodeRepository.findByIdsAndIsDeletedFalse(List.of(30L)))
+                .thenReturn(List.of(pointA));
+        // 点位A容量8、在用1、余7：加总7 < 阈值10，但既不满也不将满
+        when(benchRepository.countActiveByNodeIds(List.of(30L)))
+                .thenReturn(List.<Object[]>of(occupiedRow(30L, 1L)));
+
+        SectionCapacityAlarmDTO detail = treeNodeService.getSectionCapacityAlarm(20L);
+
+        assertFalse(detail.getAlarm());
+        assertEquals(7L, detail.getRemainingSum());
+        assertEquals(0, detail.getFullCount());
+        assertEquals(0, detail.getNearlyFullCount());
+        assertTrue(detail.getPoints().isEmpty());
     }
 
     @Test

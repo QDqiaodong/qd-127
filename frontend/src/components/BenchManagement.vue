@@ -355,6 +355,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { getAllBenches, getBenchById, createBench, updateBench, deleteBench, changeBenchNode, getChangeLogs, getBenchesByNode } from '../api/bench'
 import { getTree } from '../api/tree'
 import { getInspectionsByBench, getRepairOrdersByBench } from '../api/inspection'
+import { capacityStatusTagType } from '../constants/capacity'
 import {
   severityLabel,
   severityTagType,
@@ -422,8 +423,11 @@ const sectionMap = ref({})
 const pointMap = ref({})
 const pointInfoMap = ref({})
 
+// 点位容量标记颜色：优先取后端 capacityStatus（与街区树点位标记同源），无则按剩余数兜底
 const capacityTagType = (point) => {
-  if (!point || point.remainingCount === undefined || point.remainingCount === null) return 'info'
+  if (!point) return 'info'
+  if (point.capacityStatus) return capacityStatusTagType(point.capacityStatus)
+  if (point.remainingCount === undefined || point.remainingCount === null) return 'info'
   if (point.remainingCount === 0) return 'danger'
   if (point.remainingCount <= 2) return 'warning'
   return 'success'

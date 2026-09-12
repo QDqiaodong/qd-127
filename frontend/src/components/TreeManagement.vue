@@ -4,10 +4,20 @@
       <template #header>
         <div class="header">
           <h3>街区树形分类管理</h3>
-          <el-button type="primary" @click="handleAdd">
-            <el-icon><Plus /></el-icon>
-            添加节点
-          </el-button>
+          <div class="header-right">
+            <el-tag
+              v-if="capacityAlarmSectionCount > 0"
+              type="warning"
+              effect="dark"
+              class="alarm-count-tag"
+            >
+              容量告警 {{ capacityAlarmSectionCount }} 处
+            </el-tag>
+            <el-button type="primary" @click="handleAdd">
+              <el-icon><Plus /></el-icon>
+              添加节点
+            </el-button>
+          </div>
         </div>
       </template>
 
@@ -39,6 +49,16 @@
                 @click.stop="openSectionLightingDetail(data)"
               >
                 照明异常 {{ data.lightingAbnormalCount }} 处
+              </el-tag>
+              <el-tag
+                v-if="data.level === 2 && data.capacityAlarm"
+                size="small"
+                type="warning"
+                effect="plain"
+                class="capacity-tag section-capacity-tag"
+                @click.stop="openSectionCapacityAlarm(data)"
+              >
+                容量告警·余{{ data.capacityRemainingSum }}
               </el-tag>
               <el-tag
                 v-if="data.level === 3"
@@ -186,7 +206,48 @@
       </el-table>
     </el-dialog>
 
-    <el-dialog v-model="capacityLogVisible" :title="`容量调整记录 - ${capacityLogNodeName}`" width="640px">      <el-table :data="capacityLogs" border size="small">
+    <el-dialog
+      v-model="sectionCapacityVisible"
+      :title="`路段容量告警 - ${sectionCapacityDetail ? sectionCapacityDetail.sectionName : ''}`"
+      width="640px"
+    >
+      <div v-loading="sectionCapacityLoading">
+        <el-alert
+          v-if="sectionCapacityDetail"
+          type="warning"
+          :closable="false"
+          show-icon
+          class="alarm-summary"
+        >
+          <template #title>
+            剩余容量加总 {{ sectionCapacityDetail.remainingSum }}，低于阈值
+            {{ sectionCapacityDetail.threshold }}（已满 {{ sectionCapacityDetail.fullCount }} 处，将满
+            {{ sectionCapacityDetail.nearlyFullCount }} 处）
+          </template>
+        </el-alert>
+        <el-table :data="sectionCapacityDetail ? sectionCapacityDetail.points : []" border size="small" max-height="420">
+          <el-table-column prop="name" label="点位" />
+          <el-table-column label="占用/上限" width="110">
+            <template #default="{ row }">{{ row.occupiedCount ?? 0 }}/{{ row.capacity }}</template>
+          </el-table-column>
+          <el-table-column label="剩余" width="80">
+            <template #default="{ row }">{{ row.remainingCount ?? 0 }}</template>
+          </el-table-column>
+          <el-table-column label="容量状态" width="100">
+            <template #default="{ row }">
+              <el-tag size="small" :type="capacityStatusTagType(row.capacityStatus)" effect="plain">
+                {{ capacityStatusLabel(row.capacityStatus) }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <template #empty>
+            <el-empty description="该路段暂无已满或将满点位" :image-size="60" />
+          </template>
+        </el-table>
+      </div>
+    </el-dialog>
+
+    <el-dialog v-model="capacityLogVisible" :title="`容量调整记录 - ${capacityLogNodeName}`" width="640px"><el-table :data="capacityLogs" border size="small">
         <el-table-column prop="adjustedAt" label="调整时间" width="170" />
         <el-table-column label="容量变化" width="110">
           <template #default="{ row }">
@@ -256,9 +317,10 @@
 import { ref, computed, onMounted } from 'vue'
 import { Plus, Edit, Delete, Download, Location, Grid, CirclePlus, Tickets } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getTree, createNode, updateNode, deleteNode, adjustCapacity, getCapacityLogs } from '../api/tree'
+import { getTree, createNode, updateNode, deleteNode, adjustCapacity, getCapacityLogs, getSectionCapacityAlarm } from '../api/tree'
 import { getBenchesByNode, exportAssets } from '../api/bench'
 import { getPointLightingStatuses } from '../api/lighting'
+import { capacityStatusLabel, capacityStatusTagType } from '../constants/capacity'
 
 const treeData = ref([])
 const treeProps = {
@@ -309,6 +371,38 @@ const openSectionLightingDetail = async (node) => {
   }
 }
 
+// 路段容量告警下钻
+const sectionCapacityVisible = ref(false)
+const sectionCapacityDetail = ref(null)
+const sectionCapacityLoading = ref(false)
+
+// 点开路段容量告警标记，下钻到该路段已满/将满点位（与树上告警标记同源）
+const openSectionCapacityAlarm = async (node) => {
+  sectionCapacityDetail.value = null
+  sectionCapacityVisible.value = true
+  sectionCapacityLoading.value = true
+  try {
+    sectionCapacityDetail.value = await getSectionCapacityAlarm(node.id)
+  } catch (error) {
+    ElMessage.error(error.message || '加载路段容量告警详情失败')
+  } finally {
+    sectionCapacityLoading.value = false
+  }
+}
+
+// 容量告警条数：直接统计树上标记为告警的路段，与树标记同源，刷新后保持一致
+const capacityAlarmSectionCount = computed(() => {
+  let count = 0
+  const walk = (nodes) => {
+    nodes.forEach(node => {
+      if (node.level === 2 && node.capacityAlarm) count++
+      if (node.children && node.children.length > 0) walk(node.children)
+    })
+  }
+  walk(treeData.value)
+  return count
+})
+
 const exportDialogVisible = ref(false)
 const exportScope = ref('all')
 const exportTargetNode = ref(null)
@@ -329,8 +423,11 @@ const editingPoint = computed(() =>
   isEdit.value && form.value.level === 3 ? rightClickedNode.value : null
 )
 
+// 点位容量标记颜色：优先取后端 capacityStatus（与路段告警、下钻明细同源），无则按剩余数兜底
 const capacityTagType = (point) => {
-  if (!point || point.remainingCount === undefined || point.remainingCount === null) return 'info'
+  if (!point) return 'info'
+  if (point.capacityStatus) return capacityStatusTagType(point.capacityStatus)
+  if (point.remainingCount === undefined || point.remainingCount === null) return 'info'
   if (point.remainingCount === 0) return 'danger'
   if (point.remainingCount <= 2) return 'warning'
   return 'success'
@@ -599,6 +696,16 @@ onMounted(() => {
   align-items: center;
 }
 
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.alarm-count-tag {
+  font-weight: 600;
+}
+
 .header h3 {
   font-size: 16px;
   font-weight: 600;
@@ -627,6 +734,14 @@ onMounted(() => {
 
 .section-lighting-tag {
   cursor: pointer;
+}
+
+.section-capacity-tag {
+  cursor: pointer;
+}
+
+.alarm-summary {
+  margin-bottom: 12px;
 }
 
 .capacity-full {

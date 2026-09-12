@@ -36,6 +36,9 @@ public class TreeNodeDTO {
     /** 剩余可摆放数（仅点位 level=3 有效） */
     private Long remainingCount;
 
+    /** 点位容量状态：FULL-已满，NEARLY_FULL-将满，null-充足（仅点位 level=3 有效） */
+    private String capacityStatus;
+
     /** 容量最近调整时间 */
     private java.time.LocalDateTime capacityUpdatedAt;
 
@@ -65,6 +68,21 @@ public class TreeNodeDTO {
 
     /** 路段下最近一次照明结论为异常的点位数（仅路段 level=2 有效，与点位照明标记同源） */
     private Integer lightingAbnormalCount;
+
+    /** 路段下各点位剩余容量加总（仅路段 level=2 有效；没有点位时为 null） */
+    private Long capacityRemainingSum;
+
+    /** 路段容量告警：有点位且剩余容量加总低于阈值（仅路段 level=2 有效，没有点位时恒为 false） */
+    private Boolean capacityAlarm;
+
+    /** 路段容量告警生效阈值（仅路段 level=2 有效，与告警判断同源） */
+    private Integer capacityAlarmThreshold;
+
+    /** 路段下已满点位数（仅路段 level=2 有效） */
+    private Integer capacityFullCount;
+
+    /** 路段下将满点位数（仅路段 level=2 有效） */
+    private Integer capacityNearlyFullCount;
 
     private List<TreeNodeDTO> children;
 

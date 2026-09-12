@@ -6,6 +6,7 @@ import com.example.benchmanagement.dto.NodeCapacityLogDTO;
 import com.example.benchmanagement.dto.NodeClosureLogDTO;
 import com.example.benchmanagement.dto.PointClosureRequest;
 import com.example.benchmanagement.dto.PointReopenRequest;
+import com.example.benchmanagement.dto.SectionCapacityAlarmDTO;
 import com.example.benchmanagement.dto.TreeNodeDTO;
 import com.example.benchmanagement.service.TreeNodeService;
 import jakarta.validation.Valid;
@@ -69,6 +70,14 @@ public class TreeNodeController {
     public ResponseEntity<ApiResponse<List<NodeCapacityLogDTO>>> getCapacityLogs(@PathVariable Long id) {
         List<NodeCapacityLogDTO> logs = treeNodeService.getCapacityLogs(id);
         return ResponseEntity.ok(ApiResponse.success(logs));
+    }
+
+    /**
+     * 路段容量告警详情：剩余容量加总、生效阈值及已满/将满点位明细（与树上告警标记同源）。
+     */
+    @GetMapping("/sections/{sectionId}/capacity-alarm")
+    public ResponseEntity<ApiResponse<SectionCapacityAlarmDTO>> getSectionCapacityAlarm(@PathVariable Long sectionId) {
+        return ResponseEntity.ok(ApiResponse.success(treeNodeService.getSectionCapacityAlarm(sectionId)));
     }
 
     /**

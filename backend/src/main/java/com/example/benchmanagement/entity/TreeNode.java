@@ -68,6 +68,18 @@ public class TreeNode {
 
     public static final int DEFAULT_CAPACITY = 10;
 
+    /** 路段容量告警阈值：路段下各点位剩余容量加总低于该值时，路段标记容量告警 */
+    public static final int SECTION_CAPACITY_ALARM_THRESHOLD = 10;
+
+    /** 点位将满阈值：剩余容量小于等于该值视为将满（剩余为0为已满） */
+    public static final int POINT_NEARLY_FULL_THRESHOLD = 2;
+
+    /** 点位容量状态：已满（剩余0） */
+    public static final String CAPACITY_STATUS_FULL = "FULL";
+
+    /** 点位容量状态：将满（剩余小于等于阈值） */
+    public static final String CAPACITY_STATUS_NEARLY_FULL = "NEARLY_FULL";
+
     @PrePersist
     public void prePersist() {
         this.createdAt = LocalDateTime.now();

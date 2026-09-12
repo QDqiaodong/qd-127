@@ -5,6 +5,7 @@ import com.example.benchmanagement.dto.NodeCapacityLogDTO;
 import com.example.benchmanagement.dto.NodeClosureLogDTO;
 import com.example.benchmanagement.dto.PointClosureRequest;
 import com.example.benchmanagement.dto.PointReopenRequest;
+import com.example.benchmanagement.dto.SectionCapacityAlarmDTO;
 import com.example.benchmanagement.dto.TreeNodeDTO;
 import com.example.benchmanagement.entity.NodeCapacityLog;
 import com.example.benchmanagement.entity.NodeClosureLog;
@@ -22,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -62,6 +64,7 @@ public class TreeNodeService {
 
         fillPointStatus(pointDtos);
         fillSectionLightingAbnormalCount(nodeMap.values());
+        fillSectionCapacityAlarm(nodeMap.values());
 
         rootNodes.sort((a, b) -> Integer.compare(a.getSortOrder(), b.getSortOrder()));
         for (TreeNodeDTO node : nodeMap.values()) {
@@ -79,6 +82,7 @@ public class TreeNodeService {
         }
         if (level == 2) {
             fillSectionLightingAbnormalCountByQuery(dtos);
+            fillSectionCapacityAlarmByQuery(dtos);
         }
         return dtos;
     }
@@ -93,6 +97,7 @@ public class TreeNodeService {
         List<TreeNodeDTO> sectionDtos = dtos.stream().filter(d -> d.getLevel() == 2).toList();
         if (!sectionDtos.isEmpty()) {
             fillSectionLightingAbnormalCountByQuery(sectionDtos);
+            fillSectionCapacityAlarmByQuery(sectionDtos);
         }
         return dtos;
     }
@@ -499,7 +504,9 @@ public class TreeNodeService {
             point.setCapacity(capacity);
             long occupied = countMap.getOrDefault(point.getId(), 0L);
             point.setOccupiedCount(occupied);
-            point.setRemainingCount(Math.max(0, capacity - occupied));
+            long remaining = Math.max(0, capacity - occupied);
+            point.setRemainingCount(remaining);
+            point.setCapacityStatus(capacityStatusOf(remaining));
             boolean closed = node != null && isClosed(node);
             point.setClosed(closed);
             if (closed) {
@@ -508,6 +515,19 @@ public class TreeNodeService {
                 point.setClosedReason(node.getClosedReason());
             }
         }
+    }
+
+    /**
+     * 点位容量状态：剩余0为已满，剩余小于等于将满阈值为将满，否则为充足（返回 null）。
+     */
+    private String capacityStatusOf(long remaining) {
+        if (remaining == 0) {
+            return TreeNode.CAPACITY_STATUS_FULL;
+        }
+        if (remaining <= TreeNode.POINT_NEARLY_FULL_THRESHOLD) {
+            return TreeNode.CAPACITY_STATUS_NEARLY_FULL;
+        }
+        return null;
     }
 
     /**
@@ -577,6 +597,107 @@ public class TreeNodeService {
         for (TreeNodeDTO section : sections) {
             section.setLightingAbnormalCount(abnormalBySection.getOrDefault(section.getId(), 0));
         }
+    }
+
+    /**
+     * 填充路段的容量告警：直接汇总树上已填充的点位剩余容量，
+     * 保证路段告警标记与点位容量标记同源一致。没有点位的路段不出告警。
+     */
+    private void fillSectionCapacityAlarm(java.util.Collection<TreeNodeDTO> nodes) {
+        for (TreeNodeDTO node : nodes) {
+            if (node.getLevel() != null && node.getLevel() == 2) {
+                applySectionCapacityStats(node, node.getChildren());
+            }
+        }
+    }
+
+    /**
+     * 平铺返回路段列表时，按路段id批量查询点位占用并填充容量告警，
+     * 口径与树上路段告警一致。
+     */
+    private void fillSectionCapacityAlarmByQuery(List<TreeNodeDTO> sections) {
+        if (sections == null || sections.isEmpty()) {
+            return;
+        }
+        List<Long> sectionIds = sections.stream().map(TreeNodeDTO::getId).toList();
+        List<TreeNode> points = treeNodeRepository.findByParentIdInAndIsDeletedFalse(sectionIds);
+        Map<Long, List<TreeNodeDTO>> pointsBySection = new HashMap<>();
+        if (!points.isEmpty()) {
+            List<TreeNodeDTO> pointDtos = points.stream().map(this::toDTO).toList();
+            fillCapacityStatus(pointDtos);
+            for (TreeNodeDTO point : pointDtos) {
+                pointsBySection.computeIfAbsent(point.getParentId(), k -> new ArrayList<>()).add(point);
+            }
+        }
+        for (TreeNodeDTO section : sections) {
+            applySectionCapacityStats(section, pointsBySection.getOrDefault(section.getId(), List.of()));
+        }
+    }
+
+    /**
+     * 路段容量告警统一口径：剩余容量加总低于阈值即告警；没有点位的路段不出告警。
+     */
+    private void applySectionCapacityStats(TreeNodeDTO section, List<TreeNodeDTO> points) {
+        section.setCapacityAlarmThreshold(TreeNode.SECTION_CAPACITY_ALARM_THRESHOLD);
+        if (points == null || points.isEmpty()) {
+            section.setCapacityRemainingSum(null);
+            section.setCapacityAlarm(false);
+            section.setCapacityFullCount(0);
+            section.setCapacityNearlyFullCount(0);
+            return;
+        }
+        long remainingSum = 0;
+        int fullCount = 0;
+        int nearlyFullCount = 0;
+        for (TreeNodeDTO point : points) {
+            long remaining = point.getRemainingCount() != null ? point.getRemainingCount() : 0;
+            remainingSum += remaining;
+            if (TreeNode.CAPACITY_STATUS_FULL.equals(point.getCapacityStatus())) {
+                fullCount++;
+            } else if (TreeNode.CAPACITY_STATUS_NEARLY_FULL.equals(point.getCapacityStatus())) {
+                nearlyFullCount++;
+            }
+        }
+        section.setCapacityRemainingSum(remainingSum);
+        section.setCapacityAlarm(remainingSum < TreeNode.SECTION_CAPACITY_ALARM_THRESHOLD);
+        section.setCapacityFullCount(fullCount);
+        section.setCapacityNearlyFullCount(nearlyFullCount);
+    }
+
+    /**
+     * 路段容量告警下钻详情：剩余容量加总、生效阈值及已满/将满点位明细，
+     * 与树上路段告警标记同源。
+     */
+    public SectionCapacityAlarmDTO getSectionCapacityAlarm(Long sectionId) {
+        TreeNode section = treeNodeRepository.findByIdAndIsDeletedFalse(sectionId)
+                .orElseThrow(() -> new IllegalArgumentException("路段不存在"));
+        if (section.getLevel() != 2) {
+            throw new IllegalArgumentException("只有路段(level=2)有容量告警");
+        }
+
+        List<TreeNodeDTO> pointDtos = treeNodeRepository.findByParentIdAndIsDeletedFalse(sectionId)
+                .stream().map(this::toDTO).toList();
+        fillCapacityStatus(pointDtos);
+
+        TreeNodeDTO sectionDto = toDTO(section);
+        applySectionCapacityStats(sectionDto, pointDtos);
+
+        List<TreeNodeDTO> alarmPoints = pointDtos.stream()
+                .filter(p -> p.getCapacityStatus() != null)
+                .sorted(Comparator.comparing(TreeNodeDTO::getRemainingCount)
+                        .thenComparing(TreeNodeDTO::getSortOrder))
+                .toList();
+
+        return SectionCapacityAlarmDTO.builder()
+                .sectionId(section.getId())
+                .sectionName(section.getName())
+                .threshold(sectionDto.getCapacityAlarmThreshold())
+                .remainingSum(sectionDto.getCapacityRemainingSum())
+                .alarm(sectionDto.getCapacityAlarm())
+                .fullCount(sectionDto.getCapacityFullCount())
+                .nearlyFullCount(sectionDto.getCapacityNearlyFullCount())
+                .points(alarmPoints)
+                .build();
     }
 
     private TreeNodeDTO toDTO(TreeNode node) {

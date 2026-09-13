@@ -216,24 +216,34 @@ const emptyDescription = computed(() => {
   return '暂无商户冠名记录，可点击右上角“新增冠名登记”创建'
 })
 
+// 返回是否清掉了失效的恢复筛选：清掉后需用纠正后的条件重查列表，保持筛选框与列表一致
 const loadTreeData = async () => {
-  const tree = await getTree()
-  districts.value = tree
-  // 恢复的上次筛选可能因节点删除而失效，清掉悬空项避免查出空结果却说不清原因
-  const sections = getSections(filters.value.districtId)
-  if (filters.value.districtId && sections.length === 0) {
-    filters.value.districtId = null
-    filters.value.sectionId = null
-    filters.value.pointId = null
-  } else {
+  try {
+    const tree = await getTree()
+    districts.value = tree
+    // 恢复的上次筛选可能因节点删除而失效，清掉悬空项避免查出空结果却说不清原因
+    const sections = getSections(filters.value.districtId)
+    if (filters.value.districtId && sections.length === 0) {
+      filters.value.districtId = null
+      filters.value.sectionId = null
+      filters.value.pointId = null
+      return true
+    }
     const points = getPoints(filters.value.districtId, filters.value.sectionId)
     if (filters.value.sectionId && points.length === 0) {
       filters.value.sectionId = null
       filters.value.pointId = null
-    } else if (filters.value.pointId && !points.some(p => p.id === filters.value.pointId)) {
-      filters.value.pointId = null
+      return true
     }
+    if (filters.value.pointId && !points.some(p => p.id === filters.value.pointId)) {
+      filters.value.pointId = null
+      return true
+    }
+  } catch (error) {
+    // 树加载失败只影响筛选项下拉，不应阻断台账列表展示
+    ElMessage.error(error.message || '加载街区树失败')
   }
+  return false
 }
 
 const loadSponsorships = async () => {
@@ -254,11 +264,18 @@ const loadSponsorships = async () => {
 }
 
 const reloadAll = async () => {
+  // 整段加载期间保持 loading，避免树接口未回来时表格先闪“暂无记录”空态
+  loading.value = true
   try {
-    await loadTreeData()
-    await loadSponsorships()
+    // 台账列表与街区树并行加载、各自兜底：树接口慢或失败不影响列表直接展示
+    const [filtersPruned] = await Promise.all([loadTreeData(), loadSponsorships()])
+    if (filtersPruned) {
+      await loadSponsorships()
+    }
   } catch (error) {
     ElMessage.error(error.message || '刷新失败')
+  } finally {
+    loading.value = false
   }
 }
 

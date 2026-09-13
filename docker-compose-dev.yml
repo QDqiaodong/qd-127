@@ -46,7 +46,7 @@ services:
     image: qd-127-frontend:latest
     container_name: bench-management-frontend
     ports:
-      - "127.0.0.1:${FRONTEND_PORT:-8227}:5173"
+      - "127.0.0.1:${FRONTEND_PORT:-8227}:80"
     volumes:
       - ./frontend/src:/app/src
       - ./frontend/public:/app/public

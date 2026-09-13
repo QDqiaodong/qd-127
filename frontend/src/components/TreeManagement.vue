@@ -91,14 +91,23 @@
                 <span v-if="data.remainingCount === 0" class="capacity-full">已满</span>
                 <span v-else>余{{ data.remainingCount }}</span>
               </el-tag>
-              <el-tag
+              <el-tooltip
                 v-if="data.level === 3 && data.closed"
-                size="small"
-                type="danger"
-                class="capacity-tag"
+                effect="dark"
+                placement="top"
               >
-                封闭中
-              </el-tag>
+                <template #content>
+                  <div>封闭期：{{ closurePeriodText(data) }}</div>
+                  <div>封闭原因：{{ data.closedReason || '未填写' }}</div>
+                </template>
+                <el-tag
+                  size="small"
+                  type="danger"
+                  class="capacity-tag"
+                >
+                  封闭中（{{ formatDateTimeMinute(data.closedEndAt) }} 止）
+                </el-tag>
+              </el-tooltip>
               <el-tag
                 v-if="data.level === 3 && data.lightingResult === 1"
                 size="small"
@@ -304,6 +313,88 @@
       </template>
     </el-dialog>
 
+    <el-dialog v-model="closeDialogVisible" :title="`临时封闭点位 - ${closeTargetNode ? closeTargetNode.name : ''}`" width="520px">
+      <el-alert
+        type="warning"
+        :closable="false"
+        show-icon
+        class="closure-alert"
+        title="封闭期内禁止调入长凳（新增、编辑移入、批量调入均会被阻止），且不能以该点位发起巡检；到期自动解封，也可人工解封"
+      />
+      <el-form :model="closeForm" label-width="90px">
+        <el-form-item label="开始时间" required>
+          <el-date-picker
+            v-model="closeForm.startAt"
+            type="datetime"
+            placeholder="选择封闭开始时间"
+            format="YYYY-MM-DD HH:mm"
+            value-format="YYYY-MM-DD HH:mm:ss"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="结束时间" required>
+          <el-date-picker
+            v-model="closeForm.endAt"
+            type="datetime"
+            placeholder="选择封闭结束时间（到期自动解封）"
+            format="YYYY-MM-DD HH:mm"
+            value-format="YYYY-MM-DD HH:mm:ss"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="封闭原因" required>
+          <el-input
+            v-model="closeForm.reason"
+            type="textarea"
+            :rows="2"
+            placeholder="请填写封闭原因，将展示在树和资产列表并记入台账"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="closeDialogVisible = false">取消</el-button>
+        <el-button type="danger" :loading="closeSubmitting" @click="confirmClosePoint">确认封闭</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="closureLogVisible"
+      :title="`封闭/解封记录 - ${closureLogNodeName}`"
+      width="760px"
+    >
+      <el-table :data="closureLogs" border size="small" max-height="420">
+        <el-table-column prop="operatedAt" label="操作时间" width="165">
+          <template #default="{ row }">{{ formatDateTimeMinute(row.operatedAt) }}</template>
+        </el-table-column>
+        <el-table-column label="动作" width="100">
+          <template #default="{ row }">
+            <el-tag
+              size="small"
+              :type="row.actionType === 1 ? 'danger' : 'success'"
+              effect="plain"
+            >
+              {{ row.actionTypeLabel }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="封闭期" width="260">
+          <template #default="{ row }">
+            {{ formatDateTimeMinute(row.closedStartAt) }} 至 {{ formatDateTimeMinute(row.closedEndAt) }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="closedReason" label="封闭原因" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.closedReason || '-' }}</template>
+        </el-table-column>
+        <el-table-column prop="reopenReason" label="解封原因" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.reopenReason || '-' }}</template>
+        </el-table-column>
+        <el-table-column prop="operatedBy" label="操作人" width="90" />
+        <template #empty>
+          <el-empty description="该点位暂无封闭/解封记录" :image-size="60" />
+        </template>
+      </el-table>
+    </el-dialog>
+
     <el-menu
       v-if="menuVisible"
       :default-active="''"
@@ -317,6 +408,28 @@
       <el-menu-item v-if="rightClickedNode && rightClickedNode.level === 3" @click="handleCapacityLogs">
         <el-icon><Tickets /></el-icon>
         容量调整记录
+      </el-menu-item>
+      <el-menu-item
+        v-if="rightClickedNode && rightClickedNode.level === 3 && !rightClickedNode.closed"
+        @click="handleClosePoint"
+      >
+        <el-icon><Lock /></el-icon>
+        临时封闭
+      </el-menu-item>
+      <el-menu-item
+        v-if="rightClickedNode && rightClickedNode.level === 3 && rightClickedNode.closed"
+        @click="handleReopenPoint"
+        style="color: #67c23a"
+      >
+        <el-icon><Unlock /></el-icon>
+        人工解封
+      </el-menu-item>
+      <el-menu-item
+        v-if="rightClickedNode && rightClickedNode.level === 3"
+        @click="handleClosureLogs"
+      >
+        <el-icon><Document /></el-icon>
+        封闭/解封记录
       </el-menu-item>
       <el-menu-item @click="handleDelete" style="color: #f56c6c">
         <el-icon><Delete /></el-icon>
@@ -335,12 +448,13 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { Plus, Edit, Delete, Download, Location, Grid, CirclePlus, Tickets } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, Download, Location, Grid, CirclePlus, Tickets, Lock, Unlock, Document } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getTree, createNode, updateNode, deleteNode, adjustCapacity, getCapacityLogs, getSectionCapacityAlarm } from '../api/tree'
+import { getTree, createNode, updateNode, deleteNode, adjustCapacity, getCapacityLogs, getSectionCapacityAlarm, closePoint, reopenPoint, getClosureLogs } from '../api/tree'
 import { getBenchesByNode, exportAssets } from '../api/bench'
 import { getPointLightingStatuses } from '../api/lighting'
 import { capacityStatusLabel, capacityStatusTagType } from '../constants/capacity'
+import { formatDateTimeMinute, closurePeriodText } from '../constants/closure'
 
 const treeData = ref([])
 const treeProps = {
@@ -553,6 +667,106 @@ const handleCapacityLogs = async () => {
     capacityLogVisible.value = true
   } catch (error) {
     ElMessage.error(error.message || '加载容量调整记录失败')
+  }
+}
+
+// 临时封闭点位
+const closeDialogVisible = ref(false)
+const closeSubmitting = ref(false)
+const closeTargetNode = ref(null)
+const closeForm = ref({
+  startAt: '',
+  endAt: '',
+  reason: ''
+})
+
+const buildDefaultCloseRange = () => {
+  const pad = (n) => String(n).padStart(2, '0')
+  const format = (d) =>
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+  const start = new Date()
+  const end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000)
+  return { startAt: format(start), endAt: format(end) }
+}
+
+const handleClosePoint = () => {
+  if (!rightClickedNode.value || rightClickedNode.value.level !== 3) return
+  closeTargetNode.value = rightClickedNode.value
+  closeForm.value = { ...buildDefaultCloseRange(), reason: '' }
+  menuVisible.value = false
+  closeDialogVisible.value = true
+}
+
+const confirmClosePoint = async () => {
+  const node = closeTargetNode.value
+  if (!node) return
+  if (!closeForm.value.startAt || !closeForm.value.endAt) {
+    ElMessage.warning('请选择封闭开始时间和结束时间')
+    return
+  }
+  if (new Date(closeForm.value.endAt) <= new Date(closeForm.value.startAt)) {
+    ElMessage.warning('封闭结束时间必须晚于开始时间')
+    return
+  }
+  if (!closeForm.value.reason || !closeForm.value.reason.trim()) {
+    ElMessage.warning('请填写封闭原因')
+    return
+  }
+  closeSubmitting.value = true
+  try {
+    await closePoint(node.id, {
+      startAt: closeForm.value.startAt,
+      endAt: closeForm.value.endAt,
+      reason: closeForm.value.reason.trim()
+    })
+    ElMessage.success(`点位【${node.name}】已临时封闭，封闭期内禁止调入长凳`)
+    closeDialogVisible.value = false
+    await loadTree()
+  } catch (error) {
+    ElMessage.error(error.message || '封闭失败')
+  } finally {
+    closeSubmitting.value = false
+  }
+}
+
+// 人工解封
+const handleReopenPoint = async () => {
+  if (!rightClickedNode.value || rightClickedNode.value.level !== 3) return
+  const node = rightClickedNode.value
+  menuVisible.value = false
+  try {
+    const { value } = await ElMessageBox.prompt('请填写解封原因（将记入封闭/解封台账）', `人工解封点位 - ${node.name}`, {
+      confirmButtonText: '确认解封',
+      cancelButtonText: '取消',
+      inputType: 'textarea',
+      inputPlaceholder: '例如：施工提前完成，恢复使用',
+      inputValidator: (val) => !!(val && val.trim()) || '解封原因不能为空'
+    })
+    await reopenPoint(node.id, { reason: value.trim() })
+    ElMessage.success(`点位【${node.name}】已解封，可正常调入长凳`)
+    await loadTree()
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error(error.message || '解封失败')
+    }
+  }
+}
+
+// 封闭/解封台账
+const closureLogVisible = ref(false)
+const closureLogs = ref([])
+const closureLogNodeName = ref('')
+
+const handleClosureLogs = async () => {
+  if (!rightClickedNode.value || rightClickedNode.value.level !== 3) return
+  const node = rightClickedNode.value
+  menuVisible.value = false
+  try {
+    closureLogNodeName.value = node.name
+    closureLogs.value = await getClosureLogs(node.id)
+    closureLogVisible.value = true
+  } catch (error) {
+    ElMessage.error(error.message || '加载封闭/解封记录失败')
   }
 }
 
@@ -775,6 +989,10 @@ onMounted(() => {
 
 .alarm-summary {
   margin-bottom: 12px;
+}
+
+.closure-alert {
+  margin-bottom: 14px;
 }
 
 .capacity-full {

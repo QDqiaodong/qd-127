@@ -58,7 +58,24 @@
         <el-table-column prop="height" label="高度(cm)" />
         <el-table-column prop="districtName" label="所属街区" />
         <el-table-column prop="sectionName" label="所属路段" />
-        <el-table-column prop="nodeName" label="所属点位" />
+        <el-table-column prop="nodeName" label="所属点位">
+          <template #default="{ row }">
+            <span>{{ row.nodeName }}</span>
+            <el-tooltip
+              v-if="row.pointClosed"
+              effect="dark"
+              placement="top"
+            >
+              <template #content>
+                <div>封闭期：{{ formatDateTimeMinute(row.pointClosedStartAt) }} 至 {{ formatDateTimeMinute(row.pointClosedEndAt) }}</div>
+                <div>封闭原因：{{ row.pointClosedReason || '未填写' }}</div>
+              </template>
+              <el-tag size="small" type="danger" effect="plain" class="closed-tag">
+                临时封闭中
+              </el-tag>
+            </el-tooltip>
+          </template>
+        </el-table-column>
         <el-table-column label="点位容量" width="130">
           <template #default="{ row }">
             <el-tag size="small" :type="capacityTagType(pointInfoMap[row.nodeId])" effect="plain">
@@ -164,10 +181,19 @@
               :key="p.id"
               :value="p.id"
               :label="pointOptionLabel(p)"
+              :disabled="!!p.closed"
             />
           </el-select>
           <el-tag
-            v-if="selectedFormPoint"
+            v-if="selectedFormPoint && selectedFormPoint.closed"
+            size="small"
+            type="danger"
+            class="capacity-hint"
+          >
+            该点位临时封闭中（{{ formatDateTimeMinute(selectedFormPoint.closedEndAt) }} 止），禁止调入
+          </el-tag>
+          <el-tag
+            v-else-if="selectedFormPoint"
             size="small"
             :type="capacityTagType(selectedFormPoint)"
             effect="plain"
@@ -175,6 +201,9 @@
           >
             上限{{ selectedFormPoint.capacity }}，已摆{{ selectedFormPoint.occupiedCount }}，剩余{{ selectedFormPoint.remainingCount }}
           </el-tag>
+          <div v-if="selectedFormPoint && selectedFormPoint.closed" class="closure-detail">
+            封闭期：{{ closurePeriodText(selectedFormPoint) }}；封闭原因：{{ selectedFormPoint.closedReason || '未填写' }}
+          </div>
         </el-form-item>
         <el-form-item v-if="isEdit && form.nodeId && form.nodeId !== originalNodeId" label="变更原因">
           <el-input
@@ -216,10 +245,19 @@
               :key="p.id"
               :value="p.id"
               :label="pointOptionLabel(p)"
+              :disabled="!!p.closed"
             />
           </el-select>
           <el-tag
-            v-if="selectedBatchPoint"
+            v-if="selectedBatchPoint && selectedBatchPoint.closed"
+            size="small"
+            type="danger"
+            class="capacity-hint"
+          >
+            该点位临时封闭中（{{ formatDateTimeMinute(selectedBatchPoint.closedEndAt) }} 止），禁止调入
+          </el-tag>
+          <el-tag
+            v-else-if="selectedBatchPoint"
             size="small"
             :type="capacityTagType(selectedBatchPoint)"
             effect="plain"
@@ -230,6 +268,9 @@
               ，本次移入{{ batchIncomingCount }}张，容量不足
             </span>
           </el-tag>
+          <div v-if="selectedBatchPoint && selectedBatchPoint.closed" class="closure-detail">
+            封闭期：{{ closurePeriodText(selectedBatchPoint) }}；封闭原因：{{ selectedBatchPoint.closedReason || '未填写' }}
+          </div>
         </el-form-item>
         <el-form-item label="变更原因">
           <el-input v-model="batchForm.changeReason" type="textarea" placeholder="请输入变更原因" />
@@ -265,7 +306,22 @@
         </el-descriptions-item>
         <el-descriptions-item label="所属街区">{{ detailBench.districtName || '-' }}</el-descriptions-item>
         <el-descriptions-item label="所属路段">{{ detailBench.sectionName || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="所属点位" :span="2">{{ detailBench.nodeName || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="所属点位" :span="2">
+          {{ detailBench.nodeName || '-' }}
+          <el-tag
+            v-if="detailBench.pointClosed"
+            size="small"
+            type="danger"
+            effect="plain"
+            class="closed-tag"
+          >
+            临时封闭中（{{ formatDateTimeMinute(detailBench.pointClosedEndAt) }} 止）
+          </el-tag>
+          <div v-if="detailBench.pointClosed" class="closure-detail">
+            封闭期：{{ formatDateTimeMinute(detailBench.pointClosedStartAt) }} 至 {{ formatDateTimeMinute(detailBench.pointClosedEndAt) }}
+            ｜原因：{{ detailBench.pointClosedReason || '未填写' }}
+          </div>
+        </el-descriptions-item>
         <el-descriptions-item label="最近巡检时间">{{ detailBench.latestInspectionAt || '-' }}</el-descriptions-item>
         <el-descriptions-item label="最新巡检状态">
           <el-tag :type="inspectionResultTagType(detailBench.latestInspectionResult)" size="small">
@@ -356,6 +412,7 @@ import { getAllBenches, getBenchById, createBench, updateBench, deleteBench, cha
 import { getTree } from '../api/tree'
 import { getInspectionsByBench, getRepairOrdersByBench } from '../api/inspection'
 import { capacityStatusTagType } from '../constants/capacity'
+import { formatDateTimeMinute, closurePeriodText } from '../constants/closure'
 import {
   severityLabel,
   severityTagType,
@@ -433,10 +490,19 @@ const capacityTagType = (point) => {
   return 'success'
 }
 
-const pointOptionLabel = (p) =>
-  p && p.capacity !== undefined && p.capacity !== null
+const pointOptionLabel = (p) => {
+  if (!p) return ''
+  const capacityPart = p.capacity !== undefined && p.capacity !== null
     ? `${p.name}（已摆${p.occupiedCount ?? 0}/${p.capacity}，余${p.remainingCount ?? 0}）`
     : p.name
+  return p.closed ? `${capacityPart}｜临时封闭中，禁调入` : capacityPart
+}
+
+// 封闭点位拦截提示（列表/树均以 closed 字段为准，刷新后依然生效）
+const closedPointWarning = (p) => {
+  if (!p || !p.closed) return null
+  return `点位【${p.name}】正在临时封闭（${closurePeriodText(p)}，封闭原因：${p.closedReason || '未填写'}），封闭期内禁止调入长凳，请改选其他点位或待解封后再操作`
+}
 
 const selectedFormPoint = computed(() =>
   form.value.nodeId ? pointInfoMap.value[form.value.nodeId] : null
@@ -670,8 +736,17 @@ const handleSubmit = async () => {
 
   const targetPoint = pointInfoMap.value[form.value.nodeId]
   const nodeChanged = isEdit.value && form.value.nodeId !== originalNodeId.value
+  // 封闭点位禁止调入：仅编辑但点位未变化（长凳本就在该点位）时不拦截
+  const transferIn = !isEdit.value || nodeChanged
+  if (transferIn) {
+    const closedWarning = closedPointWarning(targetPoint)
+    if (closedWarning) {
+      ElMessage.warning(closedWarning)
+      return
+    }
+  }
   if (targetPoint) {
-    const needSlots = isEdit.value ? (nodeChanged ? 1 : 0) : 1
+    const needSlots = transferIn ? 1 : 0
     if (needSlots > 0 && targetPoint.remainingCount < needSlots) {
       ElMessage.warning(`点位【${targetPoint.name}】容量已满（已摆${targetPoint.occupiedCount}/${targetPoint.capacity}），请先调整该点位容量或选择其他点位`)
       return
@@ -779,6 +854,12 @@ const handleBatchSubmit = async () => {
 
   const targetPoint = pointInfoMap.value[batchForm.value.newNodeId]
   const incomingCount = selectedBenches.value.filter(b => b.nodeId !== batchForm.value.newNodeId).length
+
+  const closedWarning = closedPointWarning(targetPoint)
+  if (closedWarning) {
+    ElMessage.warning(closedWarning)
+    return
+  }
   if (targetPoint && incomingCount > targetPoint.remainingCount) {
     ElMessage.warning(
       `点位【${targetPoint.name}】容量不足：上限${targetPoint.capacity}张，已摆${targetPoint.occupiedCount}张，剩余${targetPoint.remainingCount}个空位，本次需移入${incomingCount}张，请先扩容或减少选择数量`
@@ -860,6 +941,17 @@ onMounted(() => {
 
 .capacity-hint {
   margin-left: 10px;
+}
+
+.closed-tag {
+  margin-left: 8px;
+}
+
+.closure-detail {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #f56c6c;
+  line-height: 1.5;
 }
 
 .capacity-warn {

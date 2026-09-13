@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -34,6 +35,8 @@ public class BenchService {
     private final TreeNodeService treeNodeService;
 
     private static final String REDIS_KEY_PREFIX = "bench:specs:";
+
+    private static final DateTimeFormatter PERIOD_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
     public List<BenchDTO> getAllBenches() {
         return getAllBenches(null, null);
@@ -432,14 +435,22 @@ public class BenchService {
     }
 
     /**
-     * 封闭期内禁止往该点位调入（新增/移入）长凳。
+     * 封闭期内禁止往该点位调入长凳（新增建档、编辑移入、批量调入一律拦截），
+     * 返回明确原因：点位名称、封闭起止时间、封闭原因。
+     * 封闭状态由 treeNodeService 按当前时间实时判断（到期视为未封闭），
+     * 因此页面关闭后重新打开、服务重启后判断依然有效。
      */
     private void assertPointNotClosed(TreeNode point) {
         if (treeNodeService.isPointClosed(point.getId())) {
-            String endAt = point.getClosedEndAt() != null ? point.getClosedEndAt().toString() : "未设置";
+            String startAt = point.getClosedStartAt() != null
+                    ? point.getClosedStartAt().format(PERIOD_FORMATTER) : "未设置";
+            String endAt = point.getClosedEndAt() != null
+                    ? point.getClosedEndAt().format(PERIOD_FORMATTER) : "未设置";
+            String reason = point.getClosedReason() != null && !point.getClosedReason().isBlank()
+                    ? point.getClosedReason().trim() : "未填写";
             throw new IllegalStateException(String.format(
-                    "点位【%s】处于临时封闭期（截止%s），封闭期内禁止调入长凳，到期或人工解封后恢复",
-                    point.getName(), endAt));
+                    "调入失败：点位【%s】正在临时封闭（封闭期 %s 至 %s，封闭原因：%s），封闭期内禁止调入长凳，到期自动解封或由工作人员人工解封后再操作",
+                    point.getName(), startAt, endAt, reason));
         }
     }
 
@@ -516,6 +527,7 @@ public class BenchService {
                 .latestProblemType(latestInspection != null ? latestInspection.getProblemType() : null)
                 .openOrderCount(openOrderCount)
                 .pointClosed(pointClosed)
+                .pointClosedStartAt(pointClosed ? point.getClosedStartAt() : null)
                 .pointClosedEndAt(pointClosed ? point.getClosedEndAt() : null)
                 .pointClosedReason(pointClosed ? point.getClosedReason() : null)
                 .build();

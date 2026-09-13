@@ -62,6 +62,9 @@ public class BenchDTO {
     /** 所属点位是否封闭中（到期自动解封后为false） */
     private Boolean pointClosed;
 
+    /** 点位封闭开始时间（封闭中时返回） */
+    private java.time.LocalDateTime pointClosedStartAt;
+
     /** 点位封闭结束时间（封闭中时返回） */
     private java.time.LocalDateTime pointClosedEndAt;
 

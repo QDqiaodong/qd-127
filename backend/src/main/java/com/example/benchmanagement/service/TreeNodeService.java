@@ -11,11 +11,13 @@ import com.example.benchmanagement.dto.TreeNodeDTO;
 import com.example.benchmanagement.entity.NodeCapacityLog;
 import com.example.benchmanagement.entity.NodeClosureLog;
 import com.example.benchmanagement.entity.PointLightingInspection;
+import com.example.benchmanagement.entity.PointSunshadeInspection;
 import com.example.benchmanagement.entity.TreeNode;
 import com.example.benchmanagement.repository.BenchRepository;
 import com.example.benchmanagement.repository.NodeCapacityLogRepository;
 import com.example.benchmanagement.repository.NodeClosureLogRepository;
 import com.example.benchmanagement.repository.PointLightingInspectionRepository;
+import com.example.benchmanagement.repository.PointSunshadeInspectionRepository;
 import com.example.benchmanagement.repository.TreeNodeRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -39,6 +41,7 @@ public class TreeNodeService {
     private final NodeCapacityLogRepository capacityLogRepository;
     private final NodeClosureLogRepository closureLogRepository;
     private final PointLightingInspectionRepository lightingInspectionRepository;
+    private final PointSunshadeInspectionRepository sunshadeInspectionRepository;
     private final AdditionalBenchPlanService additionalBenchPlanService;
     private final BenchSponsorshipService benchSponsorshipService;
 
@@ -67,6 +70,7 @@ public class TreeNodeService {
 
         fillPointStatus(pointDtos);
         fillSectionLightingAbnormalCount(nodeMap.values());
+        fillSectionSunshadeAbnormalCount(nodeMap.values());
         fillSectionCapacityAlarm(nodeMap.values());
         fillSectionAdditionalBenchPlans(nodeMap.values());
 
@@ -86,6 +90,7 @@ public class TreeNodeService {
         }
         if (level == 2) {
             fillSectionLightingAbnormalCountByQuery(dtos);
+            fillSectionSunshadeAbnormalCountByQuery(dtos);
             fillSectionCapacityAlarmByQuery(dtos);
             fillSectionAdditionalBenchPlans(dtos);
         }
@@ -102,6 +107,7 @@ public class TreeNodeService {
         List<TreeNodeDTO> sectionDtos = dtos.stream().filter(d -> d.getLevel() == 2).toList();
         if (!sectionDtos.isEmpty()) {
             fillSectionLightingAbnormalCountByQuery(sectionDtos);
+            fillSectionSunshadeAbnormalCountByQuery(sectionDtos);
             fillSectionCapacityAlarmByQuery(sectionDtos);
             fillSectionAdditionalBenchPlans(sectionDtos);
         }
@@ -491,6 +497,7 @@ public class TreeNodeService {
     private void fillPointStatus(List<TreeNodeDTO> points) {
         fillCapacityStatus(points);
         fillLightingStatus(points);
+        fillSunshadeStatus(points);
     }
 
     /**
@@ -607,6 +614,76 @@ public class TreeNodeService {
         }
         for (TreeNodeDTO section : sections) {
             section.setLightingAbnormalCount(abnormalBySection.getOrDefault(section.getId(), 0));
+        }
+    }
+
+    /**
+     * 批量填充点位最近一次遮阳棚结论（树标记与遮阳棚巡查记录同源，刷新后保持一致）。
+     */
+    private void fillSunshadeStatus(List<TreeNodeDTO> points) {
+        if (points == null || points.isEmpty()) {
+            return;
+        }
+        List<Long> pointIds = points.stream().map(TreeNodeDTO::getId).toList();
+        Map<Long, PointSunshadeInspection> latestMap = new HashMap<>();
+        for (PointSunshadeInspection inspection
+                : sunshadeInspectionRepository.findByPointIdInOrderByInspectedAtDescIdDesc(pointIds)) {
+            latestMap.putIfAbsent(inspection.getPointId(), inspection);
+        }
+        for (TreeNodeDTO point : points) {
+            PointSunshadeInspection latest = latestMap.get(point.getId());
+            if (latest != null) {
+                point.setSunshadeResult(latest.getResult());
+                point.setSunshadeDamagedArea(latest.getDamagedArea());
+                point.setSunshadeDamagedLocation(latest.getDamagedLocation());
+                point.setSunshadeInspectedAt(latest.getInspectedAt());
+            }
+        }
+    }
+
+    /**
+     * 填充路段的遮阳棚异常点数：路段下最近一次遮阳棚结论为异常的点位数。
+     * 直接统计树上已填充的点位遮阳棚标记，保证路段计数与点位标记同源一致。
+     */
+    private void fillSectionSunshadeAbnormalCount(java.util.Collection<TreeNodeDTO> nodes) {
+        for (TreeNodeDTO node : nodes) {
+            if (node.getLevel() != null && node.getLevel() == 2) {
+                long count = node.getChildren().stream()
+                        .filter(p -> Integer.valueOf(PointSunshadeInspection.RESULT_ABNORMAL)
+                                .equals(p.getSunshadeResult()))
+                        .count();
+                node.setSunshadeAbnormalCount((int) count);
+            }
+        }
+    }
+
+    /**
+     * 平铺返回路段列表时，按路段id批量查询点位最近一次遮阳棚结论并填充异常点数，
+     * 口径与树上路段计数一致。
+     */
+    private void fillSectionSunshadeAbnormalCountByQuery(List<TreeNodeDTO> sections) {
+        if (sections == null || sections.isEmpty()) {
+            return;
+        }
+        List<Long> sectionIds = sections.stream().map(TreeNodeDTO::getId).toList();
+        List<TreeNode> points = treeNodeRepository.findByParentIdInAndIsDeletedFalse(sectionIds);
+        Map<Long, Integer> abnormalBySection = new HashMap<>();
+        if (!points.isEmpty()) {
+            List<Long> pointIds = points.stream().map(TreeNode::getId).toList();
+            Map<Long, PointSunshadeInspection> latestMap = new HashMap<>();
+            for (PointSunshadeInspection inspection
+                    : sunshadeInspectionRepository.findByPointIdInOrderByInspectedAtDescIdDesc(pointIds)) {
+                latestMap.putIfAbsent(inspection.getPointId(), inspection);
+            }
+            for (TreeNode point : points) {
+                PointSunshadeInspection latest = latestMap.get(point.getId());
+                if (latest != null && latest.getResult() == PointSunshadeInspection.RESULT_ABNORMAL) {
+                    abnormalBySection.merge(point.getParentId(), 1, Integer::sum);
+                }
+            }
+        }
+        for (TreeNodeDTO section : sections) {
+            section.setSunshadeAbnormalCount(abnormalBySection.getOrDefault(section.getId(), 0));
         }
     }
 

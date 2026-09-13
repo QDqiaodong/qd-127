@@ -203,6 +203,22 @@ CREATE TABLE IF NOT EXISTS point_lighting_inspection (
     CONSTRAINT fk_lighting_point FOREIGN KEY (point_id) REFERENCES tree_node(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='点位夜间照明巡查记录表';
 
+CREATE TABLE IF NOT EXISTS point_sunshade_inspection (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    point_id BIGINT NOT NULL COMMENT '点位ID(level=3)',
+    inspected_at DATETIME NOT NULL COMMENT '巡查时间',
+    result TINYINT NOT NULL COMMENT '遮阳棚结论：1-完好，0-异常(破损)',
+    damaged_area DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '破损面积(平方米)，完好为0',
+    damaged_location VARCHAR(200) COMMENT '破损位置(异常时必填)',
+    description VARCHAR(1000) COMMENT '备注说明',
+    inspector VARCHAR(50) NOT NULL COMMENT '巡查人',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_point_id (point_id),
+    INDEX idx_inspected_at (inspected_at),
+    CONSTRAINT fk_sunshade_point FOREIGN KEY (point_id) REFERENCES tree_node(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='点位遮阳棚巡查记录表';
+
 CREATE TABLE IF NOT EXISTS additional_bench_plan (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     district_id BIGINT NOT NULL COMMENT '所属街区ID(level=1)',

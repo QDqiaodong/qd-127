@@ -69,6 +69,21 @@ public class TreeNodeDTO {
     /** 路段下最近一次照明结论为异常的点位数（仅路段 level=2 有效，与点位照明标记同源） */
     private Integer lightingAbnormalCount;
 
+    /** 最近一次遮阳棚结论：1-完好，0-异常，null-未巡查（仅点位 level=3 有效） */
+    private Integer sunshadeResult;
+
+    /** 最近一次遮阳棚破损面积（平方米，仅点位 level=3 有效） */
+    private java.math.BigDecimal sunshadeDamagedArea;
+
+    /** 最近一次遮阳棚破损位置（仅点位 level=3 有效） */
+    private String sunshadeDamagedLocation;
+
+    /** 最近一次遮阳棚巡查时间（仅点位 level=3 有效） */
+    private java.time.LocalDateTime sunshadeInspectedAt;
+
+    /** 路段下最近一次遮阳棚结论为异常的点位数（仅路段 level=2 有效，与点位遮阳棚标记同源） */
+    private Integer sunshadeAbnormalCount;
+
     /** 路段下各点位剩余容量加总（仅路段 level=2 有效；没有点位时为 null） */
     private Long capacityRemainingSum;
 

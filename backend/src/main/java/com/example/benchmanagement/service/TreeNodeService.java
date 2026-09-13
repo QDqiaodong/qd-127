@@ -40,6 +40,7 @@ public class TreeNodeService {
     private final NodeClosureLogRepository closureLogRepository;
     private final PointLightingInspectionRepository lightingInspectionRepository;
     private final AdditionalBenchPlanService additionalBenchPlanService;
+    private final BenchSponsorshipService benchSponsorshipService;
 
     public List<TreeNodeDTO> getTree() {
         List<TreeNode> allNodes = treeNodeRepository.findAllActiveNodes();
@@ -447,6 +448,7 @@ public class TreeNodeService {
         }
 
         if (node.getLevel() == 3) {
+            benchSponsorshipService.validatePointCanDelete(id);
             long occupied = benchRepository.countByNodeId(id);
             if (occupied > 0) {
                 throw new IllegalArgumentException(String.format(

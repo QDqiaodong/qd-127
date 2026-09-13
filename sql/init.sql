@@ -236,6 +236,19 @@ CREATE TABLE IF NOT EXISTS additional_bench_plan_log (
     CONSTRAINT fk_add_plan_log_plan FOREIGN KEY (plan_id) REFERENCES additional_bench_plan(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='加凳投放核销记录表';
 
+CREATE TABLE IF NOT EXISTS bench_sponsorship (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    point_id BIGINT NOT NULL COMMENT '冠名点位ID(level=3)',
+    merchant_name VARCHAR(100) NOT NULL COMMENT '冠名商户名称',
+    sponsorship_text VARCHAR(200) NOT NULL COMMENT '冠名文案',
+    start_date DATE NOT NULL COMMENT '冠名开始日期',
+    end_date DATE NOT NULL COMMENT '冠名结束日期(过期按结束日期动态推导)',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_point_date (point_id, start_date, end_date),
+    CONSTRAINT fk_sponsorship_point FOREIGN KEY (point_id) REFERENCES tree_node(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='商户长凳冠名台账表';
+
 INSERT INTO tree_node (parent_id, level, name, sort_order, capacity) VALUES
 (NULL, 1, '商业步行街A区', 1, NULL),
 (NULL, 1, '商业步行街B区', 2, NULL),

@@ -30,6 +30,10 @@
             <el-icon><Flag /></el-icon>
             <span>节假日加凳预案</span>
           </el-menu-item>
+          <el-menu-item index="sponsorship">
+            <el-icon><GoldMedal /></el-icon>
+            <span>商户冠名台账</span>
+          </el-menu-item>
           <el-menu-item index="change">
             <el-icon><RefreshRight /></el-icon>
             <span>分类变更台账</span>
@@ -43,6 +47,7 @@
         <LightingInspectionManagement v-else-if="activeMenu === 'lighting'" />
         <InspectionPlanManagement v-else-if="activeMenu === 'plan'" />
         <AdditionalBenchPlanManagement v-else-if="activeMenu === 'additional-bench'" />
+        <BenchSponsorshipManagement v-else-if="activeMenu === 'sponsorship'" />
         <ChangeLogManagement v-else-if="activeMenu === 'change'" />
       </el-main>
     </el-container>
@@ -51,18 +56,19 @@
 
 <script setup>
 import { ref } from 'vue'
-import { Menu, Box, RefreshRight, Tools, Calendar, Moon, Flag } from '@element-plus/icons-vue'
+import { Menu, Box, RefreshRight, Tools, Calendar, Moon, Flag, GoldMedal } from '@element-plus/icons-vue'
 import TreeManagement from './components/TreeManagement.vue'
 import BenchManagement from './components/BenchManagement.vue'
 import InspectionManagement from './components/InspectionManagement.vue'
 import LightingInspectionManagement from './components/LightingInspectionManagement.vue'
 import InspectionPlanManagement from './components/InspectionPlanManagement.vue'
 import AdditionalBenchPlanManagement from './components/AdditionalBenchPlanManagement.vue'
+import BenchSponsorshipManagement from './components/BenchSponsorshipManagement.vue'
 import ChangeLogManagement from './components/ChangeLogManagement.vue'
 
 // 记住当前菜单：关掉页面再打开时回到原页面，页面内筛选项由各自组件恢复
 const MENU_STORAGE_KEY = 'bench-management-active-menu'
-const MENU_KEYS = ['tree', 'bench', 'inspection', 'lighting', 'plan', 'additional-bench', 'change']
+const MENU_KEYS = ['tree', 'bench', 'inspection', 'lighting', 'plan', 'additional-bench', 'sponsorship', 'change']
 
 const restoreActiveMenu = () => {
   const saved = localStorage.getItem(MENU_STORAGE_KEY)

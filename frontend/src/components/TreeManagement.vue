@@ -554,10 +554,11 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { Plus, Edit, Delete, Download, Location, Grid, CirclePlus, Tickets, Lock, Unlock, Document } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getTree, createNode, updateNode, deleteNode, adjustCapacity, getCapacityLogs, getSectionCapacityAlarm, closePoint, reopenPoint, getClosureLogs } from '../api/tree'
+import { treeEvents } from '../api/treeEvents'
 import { getBenchesByNode, exportAssets } from '../api/bench'
 import { getPointLightingStatuses } from '../api/lighting'
 import { getAntiSlipMatLedgers } from '../api/antiSlipMat'
@@ -1102,6 +1103,14 @@ const downloadCSV = (content, filename) => {
 
 onMounted(() => {
   loadTree()
+})
+
+// 加凳预案核销/新建、防滑垫领用归还等操作改动树标记后，街区树即时重新拉取，
+// 保证树上“待加凳/逾期”等标记与各台账列表同源一致（关掉页面再打开仍由后端实时计算）
+const offTreeChanged = treeEvents.onChange(loadTree)
+
+onBeforeUnmount(() => {
+  offTreeChanged()
 })
 </script>
 

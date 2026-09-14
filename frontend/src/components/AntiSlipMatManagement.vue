@@ -344,6 +344,7 @@ import { computed, onMounted, ref } from 'vue'
 import { Top, Back, Refresh } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { getTree } from '../api/tree'
+import { treeEvents } from '../api/treeEvents'
 import {
   getAntiSlipMatLedgers,
   issueAntiSlipMat,
@@ -593,6 +594,7 @@ const handleIssueSubmit = async () => {
     ElMessage.success('防滑垫领出登记成功')
     issueDialogVisible.value = false
     await reloadAll()
+    treeEvents.emitTreeChanged()
   } catch (error) {
     ElMessage.error(error.message || '领出登记失败')
   } finally {
@@ -704,6 +706,7 @@ const handleReturnSubmit = async () => {
     ElMessage.success('防滑垫归还登记成功')
     returnDialogVisible.value = false
     await reloadAll()
+    treeEvents.emitTreeChanged()
   } catch (error) {
     ElMessage.error(error.message || '归还登记失败')
   } finally {

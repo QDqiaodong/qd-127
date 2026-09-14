@@ -228,6 +228,7 @@ import { computed, onMounted, ref } from 'vue'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { getTree } from '../api/tree'
+import { treeEvents } from '../api/treeEvents'
 import {
   createAdditionalBenchPlan,
   getAdditionalBenchPlanDetail,
@@ -430,7 +431,10 @@ const handleCreateSubmit = async () => {
     })
     ElMessage.success('加凳预案提交成功')
     createDialogVisible.value = false
+    // 同步本页树下拉并通知街区树刷新：新预案会在路段上挂出待加凳数量
+    await loadTreeData()
     await loadPlans()
+    treeEvents.emitTreeChanged()
   } catch (error) {
     ElMessage.error(error.message || '提交加凳预案失败')
   } finally {
@@ -480,7 +484,9 @@ const handleVerifySubmit = async () => {
     if (detailDialogVisible.value && detail.value?.id === updated.id) {
       detail.value = updated
     }
-    await loadPlans()
+    // 同步刷新列表与街区树：部分核销后树上待加凳数量=剩余待投放，全部核销后清零并去掉逾期标
+    await reloadAll()
+    treeEvents.emitTreeChanged()
   } catch (error) {
     ElMessage.error(error.message || '核销失败')
   } finally {

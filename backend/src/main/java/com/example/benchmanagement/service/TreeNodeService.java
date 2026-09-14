@@ -23,6 +23,8 @@ import com.example.benchmanagement.repository.PointSunshadeInspectionRepository;
 import com.example.benchmanagement.repository.TreeNodeRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -48,7 +50,12 @@ public class TreeNodeService {
     private final PointSunshadeInspectionRepository sunshadeInspectionRepository;
     private final AdditionalBenchPlanService additionalBenchPlanService;
     private final BenchSponsorshipService benchSponsorshipService;
-    private final AntiSlipMatService antiSlipMatService;
+    private AntiSlipMatService antiSlipMatService;
+
+    @Autowired
+    public void setAntiSlipMatService(@Lazy AntiSlipMatService antiSlipMatService) {
+        this.antiSlipMatService = antiSlipMatService;
+    }
 
     public List<TreeNodeDTO> getTree() {
         List<TreeNode> allNodes = treeNodeRepository.findAllActiveNodes();

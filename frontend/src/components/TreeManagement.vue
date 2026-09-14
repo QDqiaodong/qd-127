@@ -21,6 +21,14 @@
             >
               加凳逾期 {{ additionalBenchOverdueSectionCount }} 处
             </el-tag>
+            <el-tag
+              v-if="sponsorshipExpiringSectionCount > 0"
+              type="danger"
+              effect="plain"
+              class="alarm-count-tag"
+            >
+              冠名临期 {{ sponsorshipExpiringSectionCount }} 处
+            </el-tag>
             <el-button type="primary" @click="handleAdd">
               <el-icon><Plus /></el-icon>
               添加节点
@@ -80,6 +88,27 @@
                   ·逾期{{ data.additionalBenchOverduePlanCount }}
                 </template>
               </el-tag>
+              <el-tag
+                v-if="data.level === 2 && data.sponsorshipExpiringSectionCount > 0"
+                size="small"
+                type="danger"
+                effect="plain"
+                class="capacity-tag"
+              >
+                冠名临期 {{ data.sponsorshipExpiringSectionCount }}
+              </el-tag>
+              <el-tooltip
+                v-if="data.level === 3 && data.sponsorshipExpiringCount > 0"
+                effect="dark"
+                placement="top"
+              >
+                <template #content>
+                  <div>{{ sponsorshipTooltip(data) }}</div>
+                </template>
+                <el-tag size="small" type="danger" effect="plain" class="capacity-tag">
+                  冠名临期·{{ sponsorshipRemainingText(data) }}
+                </el-tag>
+              </el-tooltip>
               <el-tag
                 v-if="data.level === 3"
                 size="small"
@@ -549,6 +578,33 @@ const additionalBenchOverdueSectionCount = computed(() => {
   walk(treeData.value)
   return count
 })
+
+// 有冠名临期记录的路段数：直接统计街区树返回字段，和路段临期标记同源
+const sponsorshipExpiringSectionCount = computed(() => {
+  let count = 0
+  const walk = (nodes) => {
+    nodes.forEach(node => {
+      if (node.level === 2 && node.sponsorshipExpiringSectionCount > 0) count++
+      if (node.children && node.children.length > 0) walk(node.children)
+    })
+  }
+  walk(treeData.value)
+  return count
+})
+
+const sponsorshipRemainingText = (point) => {
+  const days = Number(point.sponsorshipNearestDaysRemaining)
+  return days === 0 ? '今日到期' : `剩${days}天`
+}
+
+const sponsorshipTooltip = (point) => {
+  const merchant = point.sponsorshipNearestMerchantName || '冠名商户'
+  const text = point.sponsorshipNearestText ? `｜${point.sponsorshipNearestText}` : ''
+  const countPrefix = point.sponsorshipExpiringCount > 1
+    ? `${point.sponsorshipExpiringCount}条冠名即将到期，最早：`
+    : ''
+  return `${countPrefix}${merchant}冠名${text}，${point.sponsorshipNearestEndDate} 到期（${sponsorshipRemainingText(point)}）`
+}
 
 const exportDialogVisible = ref(false)
 const exportScope = ref('all')

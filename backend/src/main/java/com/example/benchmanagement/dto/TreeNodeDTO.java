@@ -108,6 +108,24 @@ public class TreeNodeDTO {
     /** 路段下逾期且仍未完全投放的加凳预案数（仅路段 level=2 有效） */
     private Integer additionalBenchOverduePlanCount;
 
+    /** 点位即将到期的有效冠名数（仅点位 level=3 有效；没有时为0） */
+    private Integer sponsorshipExpiringCount;
+
+    /** 点位最早到期的冠名结束日期（仅点位 level=3 有效） */
+    private java.time.LocalDate sponsorshipNearestEndDate;
+
+    /** 点位最早到期的冠名剩余天数（仅点位 level=3 有效） */
+    private Long sponsorshipNearestDaysRemaining;
+
+    /** 点位最早到期的冠名商户（仅点位 level=3 有效） */
+    private String sponsorshipNearestMerchantName;
+
+    /** 点位最早到期的冠名文案（仅点位 level=3 有效） */
+    private String sponsorshipNearestText;
+
+    /** 路段下即将到期的有效冠名记录数（仅路段 level=2 有效；没有时为0） */
+    private Integer sponsorshipExpiringSectionCount;
+
     private List<TreeNodeDTO> children;
 
     private String path;

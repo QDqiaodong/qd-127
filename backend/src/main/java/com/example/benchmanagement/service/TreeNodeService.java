@@ -10,6 +10,7 @@ import com.example.benchmanagement.dto.SectionCapacityAlarmDTO;
 import com.example.benchmanagement.dto.TreeNodeDTO;
 import com.example.benchmanagement.entity.NodeCapacityLog;
 import com.example.benchmanagement.entity.NodeClosureLog;
+import com.example.benchmanagement.entity.BenchSponsorship;
 import com.example.benchmanagement.entity.PointLightingInspection;
 import com.example.benchmanagement.entity.PointSunshadeInspection;
 import com.example.benchmanagement.entity.TreeNode;
@@ -24,7 +25,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -73,6 +76,7 @@ public class TreeNodeService {
         fillSectionSunshadeAbnormalCount(nodeMap.values());
         fillSectionCapacityAlarm(nodeMap.values());
         fillSectionAdditionalBenchPlans(nodeMap.values());
+        fillSectionSponsorshipExpiring(nodeMap.values());
 
         rootNodes.sort((a, b) -> Integer.compare(a.getSortOrder(), b.getSortOrder()));
         for (TreeNodeDTO node : nodeMap.values()) {
@@ -93,6 +97,7 @@ public class TreeNodeService {
             fillSectionSunshadeAbnormalCountByQuery(dtos);
             fillSectionCapacityAlarmByQuery(dtos);
             fillSectionAdditionalBenchPlans(dtos);
+            fillSectionSponsorshipExpiringByQuery(dtos);
         }
         return dtos;
     }
@@ -110,6 +115,7 @@ public class TreeNodeService {
             fillSectionSunshadeAbnormalCountByQuery(sectionDtos);
             fillSectionCapacityAlarmByQuery(sectionDtos);
             fillSectionAdditionalBenchPlans(sectionDtos);
+            fillSectionSponsorshipExpiringByQuery(sectionDtos);
         }
         return dtos;
     }
@@ -498,6 +504,7 @@ public class TreeNodeService {
         fillCapacityStatus(points);
         fillLightingStatus(points);
         fillSunshadeStatus(points);
+        fillPointSponsorshipExpiring(points);
     }
 
     /**
@@ -785,6 +792,87 @@ public class TreeNodeService {
                             node.setAdditionalBenchPendingCount(summary.getPendingCount());
                             node.setAdditionalBenchOverduePlanCount(summary.getOverduePlanCount().intValue());
                         }));
+    }
+
+    /**
+     * 批量填充点位冠名临期提醒。标记来自冠名起止日期的动态推导，
+     * 刷新页面或服务重启后仍会按当天日期重新计算并保留。
+     */
+    private void fillPointSponsorshipExpiring(List<TreeNodeDTO> points) {
+        if (points == null || points.isEmpty()) {
+            return;
+        }
+        LocalDate today = LocalDate.now();
+        List<Long> pointIds = points.stream().map(TreeNodeDTO::getId).toList();
+        Map<Long, List<BenchSponsorship>> sponsorshipsByPoint = new HashMap<>();
+        for (BenchSponsorship sponsorship
+                : benchSponsorshipService.getExpiringSoonSponsorships(pointIds, today)) {
+            sponsorshipsByPoint.computeIfAbsent(sponsorship.getPointId(), k -> new ArrayList<>()).add(sponsorship);
+        }
+
+        for (TreeNodeDTO point : points) {
+            List<BenchSponsorship> expiringSponsorships =
+                    sponsorshipsByPoint.getOrDefault(point.getId(), List.of());
+            point.setSponsorshipExpiringCount(expiringSponsorships.size());
+            if (expiringSponsorships.isEmpty()) {
+                point.setSponsorshipNearestEndDate(null);
+                point.setSponsorshipNearestDaysRemaining(null);
+                point.setSponsorshipNearestMerchantName(null);
+                point.setSponsorshipNearestText(null);
+                continue;
+            }
+
+            BenchSponsorship nearest = expiringSponsorships.get(0);
+            point.setSponsorshipNearestEndDate(nearest.getEndDate());
+            point.setSponsorshipNearestDaysRemaining(ChronoUnit.DAYS.between(today, nearest.getEndDate()));
+            point.setSponsorshipNearestMerchantName(nearest.getMerchantName());
+            point.setSponsorshipNearestText(nearest.getSponsorshipText());
+        }
+    }
+
+    /**
+     * 街区树完整返回时，路段临期冠名数直接汇总其点位上已填充的临期标记，保证树节点同源。
+     */
+    private void fillSectionSponsorshipExpiring(java.util.Collection<TreeNodeDTO> nodes) {
+        for (TreeNodeDTO node : nodes) {
+            if (node.getLevel() != null && node.getLevel() == 2) {
+                int count = node.getChildren().stream()
+                        .map(TreeNodeDTO::getSponsorshipExpiringCount)
+                        .filter(java.util.Objects::nonNull)
+                        .mapToInt(Integer::intValue)
+                        .sum();
+                node.setSponsorshipExpiringSectionCount(count);
+            }
+        }
+    }
+
+    /**
+     * 平铺返回路段时，按路段下点位数批量查询临期冠名并汇总记录数，
+     * 口径与街区树完整返回一致。
+     */
+    private void fillSectionSponsorshipExpiringByQuery(List<TreeNodeDTO> sections) {
+        if (sections == null || sections.isEmpty()) {
+            return;
+        }
+        List<Long> sectionIds = sections.stream().map(TreeNodeDTO::getId).toList();
+        List<TreeNode> points = treeNodeRepository.findByParentIdInAndIsDeletedFalse(sectionIds);
+        Map<Long, Long> countBySection = new HashMap<>();
+        if (!points.isEmpty()) {
+            LocalDate today = LocalDate.now();
+            List<Long> pointIds = points.stream().map(TreeNode::getId).toList();
+            for (BenchSponsorship sponsorship
+                    : benchSponsorshipService.getExpiringSoonSponsorships(pointIds, today)) {
+                points.stream()
+                        .filter(point -> point.getId().equals(sponsorship.getPointId()))
+                        .findFirst()
+                        .ifPresent(point ->
+                                countBySection.merge(point.getParentId(), 1L, Long::sum));
+            }
+        }
+        for (TreeNodeDTO section : sections) {
+            section.setSponsorshipExpiringSectionCount(
+                    countBySection.getOrDefault(section.getId(), 0L).intValue());
+        }
     }
 
     /**

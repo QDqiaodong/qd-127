@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -24,6 +25,10 @@ public class BenchSponsorshipService {
     public static final int EFFECTIVE_STATUS_PENDING = 1;
     public static final int EFFECTIVE_STATUS_ACTIVE = 2;
     public static final int EFFECTIVE_STATUS_EXPIRED = 3;
+    public static final int EFFECTIVE_STATUS_EXPIRING_SOON = 4;
+
+    /** 临期提醒窗口：结束日前3天（含结束日当天）开始在台账和街区树提示。 */
+    public static final int EXPIRING_SOON_DAYS = 3;
 
     private final BenchSponsorshipRepository sponsorshipRepository;
     private final TreeNodeRepository treeNodeRepository;
@@ -67,16 +72,19 @@ public class BenchSponsorshipService {
     }
 
     /**
-     * 冠名台账列表，可按街区、路段、点位、展示状态（1-待生效，2-生效中，3-已过期）筛选。
-     * 过期由结束日期与当天动态比较，因此刷新页面或隔天打开状态会自动更新。
+     * 冠名台账列表，可按街区、路段、点位、展示状态筛选。
+     * 状态：1-待生效，2-生效中，3-已过期，4-即将到期（生效中且进入结束日前3天窗口）。
+     * 过期和临期均由结束日期与当天动态比较，因此刷新页面或隔天打开状态会自动更新。
      */
     public List<BenchSponsorshipDTO> listSponsorships(Long districtId, Long sectionId,
                                                       Long pointId, Integer effectiveStatus) {
         if (effectiveStatus != null
                 && effectiveStatus != EFFECTIVE_STATUS_PENDING
                 && effectiveStatus != EFFECTIVE_STATUS_ACTIVE
-                && effectiveStatus != EFFECTIVE_STATUS_EXPIRED) {
-            throw new IllegalArgumentException("冠名状态只能为待生效(1)、生效中(2)或已过期(3)");
+                && effectiveStatus != EFFECTIVE_STATUS_EXPIRED
+                && effectiveStatus != EFFECTIVE_STATUS_EXPIRING_SOON) {
+            throw new IllegalArgumentException(
+                    "冠名状态只能为待生效(1)、生效中(2)、已过期(3)或即将到期(4)");
         }
         List<BenchSponsorship> sponsorships = sponsorshipRepository.findAllByOrderByCreatedAtDescIdDesc();
         Map<Long, TreeNode> nodeMap = getNodeMap();
@@ -88,6 +96,19 @@ public class BenchSponsorshipService {
                 .filter(dto -> districtId == null || districtId.equals(dto.getDistrictId()))
                 .filter(dto -> effectiveStatus == null || effectiveStatus.equals(dto.getEffectiveStatus()))
                 .toList();
+    }
+
+    /**
+     * 查询点位上进入临期窗口的有效冠名，供街区树批量填充标记。
+     * 同一点位可能存在多条记录，调用方按 endDate 取最早一条展示。
+     */
+    public List<BenchSponsorship> getExpiringSoonSponsorships(List<Long> pointIds, LocalDate today) {
+        if (pointIds == null || pointIds.isEmpty()) {
+            return List.of();
+        }
+        LocalDate effectiveToday = today != null ? today : LocalDate.now();
+        return sponsorshipRepository.findExpiringSoonByPointIds(
+                pointIds, effectiveToday, effectiveToday.plusDays(EXPIRING_SOON_DAYS));
     }
 
     /**
@@ -130,8 +151,12 @@ public class BenchSponsorshipService {
         boolean expired = sponsorship.getEndDate() != null && sponsorship.getEndDate().isBefore(today);
         boolean active = !expired
                 && sponsorship.getStartDate() != null && !sponsorship.getStartDate().isAfter(today);
+        long daysRemaining = sponsorship.getEndDate() == null
+                ? 0L : ChronoUnit.DAYS.between(today, sponsorship.getEndDate());
+        boolean expiringSoon = active && daysRemaining >= 0 && daysRemaining <= EXPIRING_SOON_DAYS;
         int effectiveStatus = expired
                 ? EFFECTIVE_STATUS_EXPIRED
+                : expiringSoon ? EFFECTIVE_STATUS_EXPIRING_SOON
                 : active ? EFFECTIVE_STATUS_ACTIVE : EFFECTIVE_STATUS_PENDING;
 
         return BenchSponsorshipDTO.builder()
@@ -147,6 +172,9 @@ public class BenchSponsorshipService {
                 .startDate(sponsorship.getStartDate())
                 .endDate(sponsorship.getEndDate())
                 .effectiveStatus(effectiveStatus)
+                .expiringSoon(expiringSoon)
+                .daysRemaining(daysRemaining)
+                .expiringSoonDays(EXPIRING_SOON_DAYS)
                 .expired(expired)
                 .createdAt(sponsorship.getCreatedAt())
                 .build();

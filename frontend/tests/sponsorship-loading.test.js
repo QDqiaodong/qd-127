@@ -26,6 +26,14 @@ const TREE = [
   }
 ]
 
+const EXPIRING_ROW = {
+  id: 2, pointId: 30, pointName: '广场前', sectionId: 20, sectionName: '主干道',
+  districtId: 10, districtName: 'A街区', merchantName: '李四小店',
+  sponsorshipText: '李四小店陪你等', startDate: '2026-08-01', endDate: '2026-09-15',
+  effectiveStatus: 4, expired: false, expiringSoon: true, daysRemaining: 2,
+  expiringSoonDays: 3, createdAt: '2026-09-01T10:00:00'
+}
+
 const PENDING_ROW = {
   id: 1, pointId: 30, pointName: '广场前', sectionId: 20, sectionName: '主干道',
   districtId: 10, districtName: 'A街区', merchantName: '张三奶茶',
@@ -47,8 +55,10 @@ describe('商户冠名台账 - 重进时的首屏空态问题', () => {
     getBenchSponsorshipsMock.mockReset()
     getTreeMock.mockReset()
     getBenchSponsorshipsMock.mockImplementation((params) => {
-      const rows = [PENDING_ROW]
-      return Promise.resolve(params.status ? rows.filter(r => r.effectiveStatus === params.status) : rows)
+      const rows = [PENDING_ROW, EXPIRING_ROW]
+      if (!params.status) return Promise.resolve(rows)
+      if (params.status === 4) return Promise.resolve(rows.filter(r => r.expiringSoon))
+      return Promise.resolve(rows.filter(r => r.effectiveStatus === params.status))
     })
   })
 
@@ -70,6 +80,26 @@ describe('商户冠名台账 - 重进时的首屏空态问题', () => {
     resolveTree(TREE)
     await flushPromises()
     expect(wrapper.text()).toContain('张三奶茶')
+  })
+
+  it('按即将到期筛选时：请求 status=4，并展示剩余天数和到期日', async () => {
+    getTreeMock.mockResolvedValue(TREE)
+    localStorage.setItem('bench-sponsorship-filters',
+      JSON.stringify({ districtId: null, sectionId: null, pointId: null, status: 4 }))
+
+    const wrapper = mount(BenchSponsorshipManagement, {
+      global: { plugins: [ElementPlus] }
+    })
+    await flushPromises()
+    await flushPromises()
+
+    expect(getBenchSponsorshipsMock.mock.calls[0][0]).toMatchObject({ status: 4 })
+    expect(wrapper.text()).toContain('李四小店')
+    expect(wrapper.text()).toContain('即将到期·剩2天')
+    expect(wrapper.text()).not.toContain('张三奶茶')
+
+    await wrapper.find('.el-table__row').trigger('click')
+    expect(wrapper.text()).toContain('剩2天，2026-09-15 到期')
   })
 
   it('树接口失败/超时时：台账列表仍应加载出来，而不是一直空着等点查询', async () => {

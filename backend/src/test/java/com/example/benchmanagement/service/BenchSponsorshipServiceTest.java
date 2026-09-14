@@ -135,6 +135,65 @@ class BenchSponsorshipServiceTest {
     }
 
     @Test
+    void list_expiringSoon_markedAndFiltered() {
+        LocalDate today = LocalDate.now();
+        BenchSponsorship expiringToday = BenchSponsorship.builder().id(1L).pointId(30L)
+                .merchantName("今日到期商户").sponsorshipText("今")
+                .startDate(today.minusDays(10)).endDate(today).build();
+        BenchSponsorship expiringInThreeDays = BenchSponsorship.builder().id(2L).pointId(30L)
+                .merchantName("三天后到期商户").sponsorshipText("三")
+                .startDate(today.minusDays(10)).endDate(today.plusDays(3)).build();
+        BenchSponsorship activeLater = BenchSponsorship.builder().id(3L).pointId(30L)
+                .merchantName("正常生效商户").sponsorshipText("正")
+                .startDate(today.minusDays(10)).endDate(today.plusDays(10)).build();
+        BenchSponsorship pendingSoon = BenchSponsorship.builder().id(4L).pointId(30L)
+                .merchantName("待生效商户").sponsorshipText("待")
+                .startDate(today.plusDays(1)).endDate(today.plusDays(3)).build();
+        when(sponsorshipRepository.findAllByOrderByCreatedAtDescIdDesc())
+                .thenReturn(List.of(expiringToday, expiringInThreeDays, activeLater, pendingSoon));
+        when(treeNodeRepository.findAllActiveNodes()).thenReturn(List.of(district, section, point));
+
+        List<BenchSponsorshipDTO> all = sponsorshipService.listSponsorships(null, null, null, null);
+
+        assertTrue(all.get(0).getExpiringSoon());
+        assertEquals(BenchSponsorshipService.EFFECTIVE_STATUS_EXPIRING_SOON, all.get(0).getEffectiveStatus());
+        assertEquals(0L, all.get(0).getDaysRemaining());
+        assertTrue(all.get(1).getExpiringSoon());
+        assertEquals(BenchSponsorshipService.EFFECTIVE_STATUS_EXPIRING_SOON, all.get(1).getEffectiveStatus());
+        assertEquals(3L, all.get(1).getDaysRemaining());
+        assertFalse(all.get(2).getExpiringSoon());
+        assertEquals(10L, all.get(2).getDaysRemaining());
+        assertFalse(all.get(3).getExpiringSoon());
+
+        List<BenchSponsorshipDTO> expiringOnly =
+                sponsorshipService.listSponsorships(null, null, null, BenchSponsorshipService.EFFECTIVE_STATUS_EXPIRING_SOON);
+        assertEquals(2, expiringOnly.size());
+        assertEquals("今日到期商户", expiringOnly.get(0).getMerchantName());
+    }
+
+    @Test
+    void getExpiringSoonSponsorships_usesSameDateWindow() {
+        LocalDate today = LocalDate.now();
+        when(sponsorshipRepository.findExpiringSoonByPointIds(
+                List.of(30L), today, today.plusDays(3)))
+                .thenReturn(List.of(BenchSponsorship.builder().id(1L).pointId(30L).build()));
+
+        List<BenchSponsorship> result =
+                sponsorshipService.getExpiringSoonSponsorships(List.of(30L), today);
+
+        assertEquals(1, result.size());
+        verify(sponsorshipRepository).findExpiringSoonByPointIds(
+                List.of(30L), today, today.plusDays(3));
+    }
+
+    @Test
+    void list_invalidStatus_throws() {
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> sponsorshipService.listSponsorships(null, null, null, 5));
+        assertTrue(ex.getMessage().contains("即将到期"));
+    }
+
+    @Test
     void list_filterByPoint_returnsOnlyThatPoint() {
         LocalDate today = LocalDate.now();
         BenchSponsorship one = BenchSponsorship.builder().id(1L).pointId(30L)

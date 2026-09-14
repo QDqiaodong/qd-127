@@ -19,7 +19,8 @@ public class BenchSponsorshipController {
     private final BenchSponsorshipService sponsorshipService;
 
     /**
-     * 商户冠名台账列表，可按街区、路段、点位、展示状态（1-待生效，2-生效中，3-已过期）筛选。
+     * 商户冠名台账列表，可按街区、路段、点位和展示状态筛选。
+     * status：1-待生效，2-生效中，3-已过期，4-即将到期（生效中且进入结束日前3天窗口）。
      */
     @GetMapping
     public ResponseEntity<ApiResponse<List<BenchSponsorshipDTO>>> listSponsorships(

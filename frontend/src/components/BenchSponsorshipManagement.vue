@@ -21,7 +21,7 @@
         type="info"
         :closable="false"
         show-icon
-        title="按点位登记商户冠名：提交后先进入待生效，到达开始日期自动变为生效中，结束日期过后自动标记已过期。"
+        title="按点位登记商户冠名：提交后先进入待生效，到达开始日期自动变为生效中，结束日前3天提示即将到期，结束日期过后自动标记已过期。"
         class="rule-alert"
       />
 
@@ -38,6 +38,7 @@
         <el-select v-model="filters.status" placeholder="冠名状态" class="filter-item filter-status" clearable @change="loadSponsorships">
           <el-option label="待生效" :value="1" />
           <el-option label="生效中" :value="2" />
+          <el-option label="即将到期（3天内）" :value="4" />
           <el-option label="已过期" :value="3" />
         </el-select>
         <el-button type="primary" @click="loadSponsorships">查询</el-button>
@@ -48,23 +49,43 @@
         共 <b>{{ sponsorships.length }}</b> 条{{ filters.status ? `（${statusLabel(filters.status)}）` : '' }}冠名记录
       </div>
 
-      <el-table :data="sponsorships" v-loading="loading" border class="data-table">
+      <el-table
+        :data="sponsorships"
+        v-loading="loading"
+        border
+        class="data-table"
+        row-class-name="sponsorship-row"
+        @row-click="openDetail"
+      >
         <el-table-column prop="districtName" label="街区" width="150" show-overflow-tooltip />
         <el-table-column prop="sectionName" label="路段" width="160" show-overflow-tooltip />
         <el-table-column prop="pointName" label="冠名点位" width="180" show-overflow-tooltip />
         <el-table-column prop="merchantName" label="商户名称" width="150" show-overflow-tooltip />
         <el-table-column prop="sponsorshipText" label="冠名文案" min-width="200" show-overflow-tooltip />
-        <el-table-column label="冠名起止日期" width="200">
+        <el-table-column label="冠名起止日期" width="190">
           <template #default="{ row }">{{ row.startDate }} 至 {{ row.endDate }}</template>
+        </el-table-column>
+        <el-table-column label="到期提醒" width="130">
+          <template #default="{ row }">
+            <el-tag v-if="row.expiringSoon" size="small" type="danger" effect="plain">
+              即将到期·{{ remainingDaysText(row) }}
+            </el-tag>
+            <span v-else class="muted-text">-</span>
+          </template>
         </el-table-column>
         <el-table-column label="状态" width="100" align="center">
           <template #default="{ row }">
-            <el-tag size="small" :type="statusTagType(row.effectiveStatus)">
-              {{ statusLabel(row.effectiveStatus) }}
+            <el-tag size="small" :type="statusTagType(row)">
+              {{ statusLabel(row) }}
             </el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="createdAt" label="登记时间" width="170" />
+        <el-table-column label="操作" width="80" align="center" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" size="small" @click.stop="openDetail(row)">详情</el-button>
+          </template>
+        </el-table-column>
         <template #empty>
           <el-empty :description="emptyDescription" :image-size="70" />
         </template>
@@ -115,12 +136,39 @@
           />
         </el-form-item>
         <el-form-item label="提交后状态">
-          <el-tag type="warning" effect="plain">待生效（到达开始日期自动生效，结束后自动标记过期）</el-tag>
+          <el-tag type="warning" effect="plain">待生效（到达开始日期自动生效，结束前3天提示临期，结束后自动标记过期）</el-tag>
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="createDialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="submitting" @click="handleCreateSubmit">提交</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="detailDialogVisible" title="冠名记录详情" width="620px">
+      <template v-if="detail">
+        <el-descriptions :column="2" border size="small">
+          <el-descriptions-item label="所属街区">{{ detail.districtName || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="所属路段">{{ detail.sectionName || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="冠名点位" :span="2">{{ detail.pointName || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="商户名称">{{ detail.merchantName }}</el-descriptions-item>
+          <el-descriptions-item label="当前状态">
+            <el-tag size="small" :type="statusTagType(detail)">{{ statusLabel(detail) }}</el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="冠名文案" :span="2">{{ detail.sponsorshipText }}</el-descriptions-item>
+          <el-descriptions-item label="开始日期">{{ detail.startDate }}</el-descriptions-item>
+          <el-descriptions-item label="到期日期">{{ detail.endDate }}</el-descriptions-item>
+          <el-descriptions-item label="到期提醒" :span="2">
+            <el-tag v-if="detail.expiringSoon" type="danger" effect="plain" size="small">
+              {{ expirationTip(detail) }}
+            </el-tag>
+            <span v-else>{{ normalExpirationText(detail) }}</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="登记时间" :span="2">{{ detail.createdAt || '-' }}</el-descriptions-item>
+        </el-descriptions>
+      </template>
+      <template #footer>
+        <el-button type="primary" @click="detailDialogVisible = false">知道了</el-button>
       </template>
     </el-dialog>
   </div>
@@ -156,7 +204,7 @@ const restoreFilters = () => {
         districtId: saved.districtId ?? null,
         sectionId: saved.sectionId ?? null,
         pointId: saved.pointId ?? null,
-        status: [1, 2, 3].includes(saved.status) ? saved.status : null
+        status: [1, 2, 3, 4].includes(saved.status) ? saved.status : null
       }
     }
   } catch (error) {
@@ -177,6 +225,13 @@ const createForm = ref({
   sponsorshipText: ''
 })
 const dateRange = ref([])
+const detailDialogVisible = ref(false)
+const detail = ref(null)
+
+const openDetail = (row) => {
+  detail.value = row
+  detailDialogVisible.value = true
+}
 
 const getSections = (districtId) => {
   const district = districts.value.find(d => d.id === districtId)
@@ -193,17 +248,49 @@ const createPoints = computed(() => getPoints(createForm.value.districtId, creat
 const filteredSections = computed(() => getSections(filters.value.districtId))
 const filteredPoints = computed(() => getPoints(filters.value.districtId, filters.value.sectionId))
 
-const statusLabel = (status) => ({
+const STATUS_LABELS = {
   1: '待生效',
   2: '生效中',
-  3: '已过期'
-}[status] || '未知')
+  3: '已过期',
+  4: '即将到期'
+}
 
-const statusTagType = (status) => ({
-  1: 'warning',
-  2: 'success',
-  3: 'info'
-}[status] || 'info')
+const isExpiringSoon = (row) => Boolean(row?.expiringSoon)
+
+const statusLabel = (statusOrRow) => {
+  const row = typeof statusOrRow === 'object' ? statusOrRow : null
+  const status = row ? row.effectiveStatus : statusOrRow
+  if (isExpiringSoon(row)) return '即将到期'
+  return STATUS_LABELS[status] || '未知'
+}
+
+const statusTagType = (statusOrRow) => {
+  const row = typeof statusOrRow === 'object' ? statusOrRow : null
+  const status = row ? row.effectiveStatus : statusOrRow
+  if (isExpiringSoon(row)) return 'danger'
+  return {
+    1: 'warning',
+    2: 'success',
+    3: 'info'
+  }[status] || 'info'
+}
+
+const remainingDaysText = (row) => {
+  const days = Number(row.daysRemaining)
+  if (days === 0) return '今日到期'
+  return `剩${days}天`
+}
+
+const expirationTip = (row) =>
+  `${remainingDaysText(row)}，${row.endDate} 到期`
+
+const normalExpirationText = (row) => {
+  const days = Number(row.daysRemaining)
+  if (row.effectiveStatus === 3) return `已于 ${row.endDate} 到期`
+  if (row.effectiveStatus === 1) return `开始后生效，${row.endDate} 到期`
+  if (days > 0) return `生效中，${row.endDate} 到期，还剩 ${days} 天`
+  return `${row.endDate} 到期`
+}
 
 // 空列表提示：明确区分“某状态没有记录”和“所选点位/范围没有记录”，避免空白说不清
 const emptyDescription = computed(() => {
@@ -396,7 +483,7 @@ onMounted(() => {
 }
 
 .filter-status {
-  width: 140px;
+  width: 170px;
 }
 
 .result-summary {
@@ -411,5 +498,13 @@ onMounted(() => {
 
 .data-table {
   width: 100%;
+}
+
+:deep(.sponsorship-row) {
+  cursor: pointer;
+}
+
+.muted-text {
+  color: #909399;
 }
 </style>

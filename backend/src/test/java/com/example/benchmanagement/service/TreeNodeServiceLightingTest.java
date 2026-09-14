@@ -7,6 +7,7 @@ import com.example.benchmanagement.repository.BenchRepository;
 import com.example.benchmanagement.repository.NodeCapacityLogRepository;
 import com.example.benchmanagement.repository.NodeClosureLogRepository;
 import com.example.benchmanagement.repository.PointLightingInspectionRepository;
+import com.example.benchmanagement.repository.PointSunshadeInspectionRepository;
 import com.example.benchmanagement.repository.TreeNodeRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -37,7 +38,13 @@ class TreeNodeServiceLightingTest {
     @Mock
     private PointLightingInspectionRepository lightingInspectionRepository;
     @Mock
+    private PointSunshadeInspectionRepository sunshadeInspectionRepository;
+    @Mock
+    private BenchSponsorshipService benchSponsorshipService;
+    @Mock
     private AdditionalBenchPlanService additionalBenchPlanService;
+    @Mock
+    private AntiSlipMatService antiSlipMatService;
 
     @InjectMocks
     private TreeNodeService treeNodeService;

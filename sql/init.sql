@@ -265,6 +265,22 @@ CREATE TABLE IF NOT EXISTS bench_sponsorship (
     CONSTRAINT fk_sponsorship_point FOREIGN KEY (point_id) REFERENCES tree_node(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='商户长凳冠名台账表';
 
+CREATE TABLE IF NOT EXISTS anti_slip_mat_record (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    point_id BIGINT NOT NULL COMMENT '点位ID(level=3)',
+    action_type TINYINT NOT NULL COMMENT '动作类型：1-领出，2-归还',
+    quantity INT NOT NULL COMMENT '本次数量：领出时为领出数；归还时为本次归还总数(完好+破损)',
+    damaged_quantity INT NOT NULL DEFAULT 0 COMMENT '本次破损数量(归还时填写,不能大于本次归还数)',
+    operated_at DATETIME NOT NULL COMMENT '操作时间',
+    operator VARCHAR(50) NOT NULL DEFAULT 'system' COMMENT '经办人',
+    remark VARCHAR(500) COMMENT '备注',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_point_id (point_id),
+    INDEX idx_operated_at (operated_at),
+    CONSTRAINT fk_anti_slip_mat_point FOREIGN KEY (point_id) REFERENCES tree_node(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='雨天防滑垫领用/归还流水表';
+
 INSERT INTO tree_node (parent_id, level, name, sort_order, capacity) VALUES
 (NULL, 1, '商业步行街A区', 1, NULL),
 (NULL, 1, '商业步行街B区', 2, NULL),

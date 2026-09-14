@@ -126,6 +126,24 @@ public class TreeNodeDTO {
     /** 路段下即将到期的有效冠名记录数（仅路段 level=2 有效；没有时为0） */
     private Integer sponsorshipExpiringSectionCount;
 
+    /** 点位防滑垫领出合计（仅点位 level=3 有效；从未领用为0） */
+    private Integer antiSlipMatIssuedCount;
+
+    /** 点位防滑垫归还合计（完好归还 + 破损，仅点位 level=3 有效） */
+    private Integer antiSlipMatReturnedCount;
+
+    /** 点位防滑垫破损合计（仅点位 level=3 有效） */
+    private Integer antiSlipMatDamagedCount;
+
+    /** 点位防滑垫未还数量 = 领出 - 归还（仅点位 level=3 有效；大于0即未还清） */
+    private Integer antiSlipMatOutstandingCount;
+
+    /** 路段下防滑垫未还清点位数（仅路段 level=2 有效，与点位未还标记同源） */
+    private Integer antiSlipMatOutstandingPointCount;
+
+    /** 路段下防滑垫未还数量加总（仅路段 level=2 有效） */
+    private Integer antiSlipMatOutstandingMatCount;
+
     private List<TreeNodeDTO> children;
 
     private String path;

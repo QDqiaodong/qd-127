@@ -29,6 +29,14 @@
             >
               冠名临期 {{ sponsorshipExpiringSectionCount }} 处
             </el-tag>
+            <el-tag
+              v-if="antiSlipMatOutstandingSectionCount > 0"
+              type="danger"
+              effect="dark"
+              class="alarm-count-tag"
+            >
+              防滑垫未还 {{ antiSlipMatOutstandingSectionCount }} 处
+            </el-tag>
             <el-button type="primary" @click="handleAdd">
               <el-icon><Plus /></el-icon>
               添加节点
@@ -98,6 +106,24 @@
                 冠名临期 {{ data.sponsorshipExpiringSectionCount }}
               </el-tag>
               <el-tooltip
+                v-if="data.level === 2 && data.antiSlipMatOutstandingPointCount > 0"
+                effect="dark"
+                placement="top"
+              >
+                <template #content>
+                  <div>{{ data.antiSlipMatOutstandingPointCount }} 个点位未还清，共 {{ data.antiSlipMatOutstandingMatCount }} 张未还</div>
+                </template>
+                <el-tag
+                  size="small"
+                  type="danger"
+                  effect="plain"
+                  class="capacity-tag section-anti-slip-tag"
+                  @click.stop="openSectionAntiSlipDetail(data)"
+                >
+                  防滑垫未还 {{ data.antiSlipMatOutstandingMatCount }}
+                </el-tag>
+              </el-tooltip>
+              <el-tooltip
                 v-if="data.level === 3 && data.sponsorshipExpiringCount > 0"
                 effect="dark"
                 placement="top"
@@ -163,6 +189,27 @@
                 class="capacity-tag"
               >
                 照明未巡查
+              </el-tag>
+              <el-tooltip
+                v-if="data.level === 3 && data.antiSlipMatOutstandingCount > 0"
+                effect="dark"
+                placement="top"
+              >
+                <template #content>
+                  <div>领出 {{ data.antiSlipMatIssuedCount }} / 归还 {{ data.antiSlipMatReturnedCount }}（破损 {{ data.antiSlipMatDamagedCount }}），仍有 {{ data.antiSlipMatOutstandingCount }} 张未还</div>
+                </template>
+                <el-tag size="small" type="danger" effect="plain" class="capacity-tag">
+                  防滑垫未还 {{ data.antiSlipMatOutstandingCount }}
+                </el-tag>
+              </el-tooltip>
+              <el-tag
+                v-else-if="data.level === 3 && data.antiSlipMatIssuedCount > 0"
+                size="small"
+                type="success"
+                effect="plain"
+                class="capacity-tag"
+              >
+                防滑垫已还清
               </el-tag>
             </span>
           </template>
@@ -260,6 +307,37 @@
         </el-table-column>
         <template #empty>
           <el-empty description="该路段暂无照明异常点位" :image-size="60" />
+        </template>
+      </el-table>
+    </el-dialog>
+
+    <el-dialog
+      v-model="sectionAntiSlipVisible"
+      :title="`防滑垫未还清点位 - ${sectionAntiSlipNode ? sectionAntiSlipNode.name : ''}`"
+      width="720px"
+    >
+      <el-alert
+        v-if="sectionAntiSlipNode"
+        type="error"
+        :closable="false"
+        show-icon
+        class="alarm-summary"
+        :title="`${sectionAntiSlipNode.antiSlipMatOutstandingPointCount} 个点位未还清，未还防滑垫合计 ${sectionAntiSlipNode.antiSlipMatOutstandingMatCount} 张`"
+      />
+      <el-table v-loading="sectionAntiSlipLoading" :data="sectionAntiSlipPoints" border size="small" max-height="420">
+        <el-table-column prop="pointName" label="点位" />
+        <el-table-column prop="issuedCount" label="领出" width="80" align="center" />
+        <el-table-column label="归还（完好）" width="120" align="center">
+          <template #default="{ row }">{{ row.returnedCount }}（{{ row.intactCount }}）</template>
+        </el-table-column>
+        <el-table-column prop="damagedCount" label="破损" width="80" align="center" />
+        <el-table-column label="未还" width="80" align="center">
+          <template #default="{ row }">
+            <el-tag type="danger" size="small">{{ row.outstandingCount }}</el-tag>
+          </template>
+        </el-table-column>
+        <template #empty>
+          <el-empty description="该路段暂无防滑垫未还清点位" :image-size="60" />
         </template>
       </el-table>
     </el-dialog>
@@ -482,6 +560,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { getTree, createNode, updateNode, deleteNode, adjustCapacity, getCapacityLogs, getSectionCapacityAlarm, closePoint, reopenPoint, getClosureLogs } from '../api/tree'
 import { getBenchesByNode, exportAssets } from '../api/bench'
 import { getPointLightingStatuses } from '../api/lighting'
+import { getAntiSlipMatLedgers } from '../api/antiSlipMat'
 import { capacityStatusLabel, capacityStatusTagType } from '../constants/capacity'
 import { formatDateTimeMinute, closurePeriodText } from '../constants/closure'
 
@@ -591,6 +670,40 @@ const sponsorshipExpiringSectionCount = computed(() => {
   walk(treeData.value)
   return count
 })
+
+// 防滑垫未还清的路段数：直接统计街区树返回字段，与路段/点位未还标记同源，刷新后保持一致
+const antiSlipMatOutstandingSectionCount = computed(() => {
+  let count = 0
+  const walk = (nodes) => {
+    nodes.forEach(node => {
+      if (node.level === 2 && node.antiSlipMatOutstandingPointCount > 0) count++
+      if (node.children && node.children.length > 0) walk(node.children)
+    })
+  }
+  walk(treeData.value)
+  return count
+})
+
+// 路段防滑垫未还清点位下钻
+const sectionAntiSlipVisible = ref(false)
+const sectionAntiSlipNode = ref(null)
+const sectionAntiSlipPoints = ref([])
+const sectionAntiSlipLoading = ref(false)
+
+// 点开路段防滑垫未还标记，下钻到该路段未还清点位（与点位领用台账同源）
+const openSectionAntiSlipDetail = async (node) => {
+  sectionAntiSlipNode.value = node
+  sectionAntiSlipPoints.value = []
+  sectionAntiSlipVisible.value = true
+  sectionAntiSlipLoading.value = true
+  try {
+    sectionAntiSlipPoints.value = await getAntiSlipMatLedgers({ sectionId: node.id, outstanding: true })
+  } catch (error) {
+    ElMessage.error(error.message || '加载路段防滑垫未还清点位失败')
+  } finally {
+    sectionAntiSlipLoading.value = false
+  }
+}
 
 const sponsorshipRemainingText = (point) => {
   const days = Number(point.sponsorshipNearestDaysRemaining)
@@ -1036,6 +1149,10 @@ onMounted(() => {
 }
 
 .section-lighting-tag {
+  cursor: pointer;
+}
+
+.section-anti-slip-tag {
   cursor: pointer;
 }
 

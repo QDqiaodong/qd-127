@@ -117,6 +117,7 @@ class AdditionalBenchPlanServiceTest {
                 .status(AdditionalBenchPlan.STATUS_PENDING)
                 .build();
         when(planRepository.findById(2L)).thenReturn(Optional.of(plan));
+        when(planRepository.save(any(AdditionalBenchPlan.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(treeNodeRepository.findAllActiveNodes()).thenReturn(List.of(district, section));
         when(logRepository.findByPlanIdOrderByVerifiedAtDescIdDesc(2L)).thenAnswer(invocation -> {
             AdditionalBenchPlanLog log = plan.getLastVerifiedAt() == null ? null : AdditionalBenchPlanLog.builder()
@@ -156,6 +157,7 @@ class AdditionalBenchPlanServiceTest {
                 .status(AdditionalBenchPlan.STATUS_PENDING)
                 .build();
         when(planRepository.findById(3L)).thenReturn(Optional.of(plan));
+        when(planRepository.save(any(AdditionalBenchPlan.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(treeNodeRepository.findAllActiveNodes()).thenReturn(List.of(district, section));
         when(logRepository.findByPlanIdOrderByVerifiedAtDescIdDesc(3L)).thenReturn(List.of());
 

@@ -3,6 +3,7 @@ package com.example.benchmanagement.service;
 import com.example.benchmanagement.dto.CapacityAdjustRequest;
 import com.example.benchmanagement.dto.NodeCapacityLogDTO;
 import com.example.benchmanagement.dto.NodeClosureLogDTO;
+import com.example.benchmanagement.dto.PointAntiSlipMatDTO;
 import com.example.benchmanagement.dto.PointClosureRequest;
 import com.example.benchmanagement.dto.PointReopenRequest;
 import com.example.benchmanagement.dto.SectionAdditionalBenchSummaryDTO;
@@ -47,6 +48,7 @@ public class TreeNodeService {
     private final PointSunshadeInspectionRepository sunshadeInspectionRepository;
     private final AdditionalBenchPlanService additionalBenchPlanService;
     private final BenchSponsorshipService benchSponsorshipService;
+    private final AntiSlipMatService antiSlipMatService;
 
     public List<TreeNodeDTO> getTree() {
         List<TreeNode> allNodes = treeNodeRepository.findAllActiveNodes();
@@ -77,6 +79,7 @@ public class TreeNodeService {
         fillSectionCapacityAlarm(nodeMap.values());
         fillSectionAdditionalBenchPlans(nodeMap.values());
         fillSectionSponsorshipExpiring(nodeMap.values());
+        fillSectionAntiSlipMatOutstanding(nodeMap.values());
 
         rootNodes.sort((a, b) -> Integer.compare(a.getSortOrder(), b.getSortOrder()));
         for (TreeNodeDTO node : nodeMap.values()) {
@@ -98,6 +101,7 @@ public class TreeNodeService {
             fillSectionCapacityAlarmByQuery(dtos);
             fillSectionAdditionalBenchPlans(dtos);
             fillSectionSponsorshipExpiringByQuery(dtos);
+            fillSectionAntiSlipMatOutstandingByQuery(dtos);
         }
         return dtos;
     }
@@ -116,6 +120,7 @@ public class TreeNodeService {
             fillSectionCapacityAlarmByQuery(sectionDtos);
             fillSectionAdditionalBenchPlans(sectionDtos);
             fillSectionSponsorshipExpiringByQuery(sectionDtos);
+            fillSectionAntiSlipMatOutstandingByQuery(sectionDtos);
         }
         return dtos;
     }
@@ -461,6 +466,7 @@ public class TreeNodeService {
 
         if (node.getLevel() == 3) {
             benchSponsorshipService.validatePointCanDelete(id);
+            antiSlipMatService.validatePointCanDelete(id);
             long occupied = benchRepository.countByNodeId(id);
             if (occupied > 0) {
                 throw new IllegalArgumentException(String.format(
@@ -505,6 +511,7 @@ public class TreeNodeService {
         fillLightingStatus(points);
         fillSunshadeStatus(points);
         fillPointSponsorshipExpiring(points);
+        fillPointAntiSlipMat(points);
     }
 
     /**
@@ -872,6 +879,79 @@ public class TreeNodeService {
         for (TreeNodeDTO section : sections) {
             section.setSponsorshipExpiringSectionCount(
                     countBySection.getOrDefault(section.getId(), 0L).intValue());
+        }
+    }
+
+    /**
+     * 批量填充点位防滑垫领出/归还/破损/未还汇总（树标记与领用台账同源，刷新后保持一致）。
+     */
+    private void fillPointAntiSlipMat(List<TreeNodeDTO> points) {
+        if (points == null || points.isEmpty()) {
+            return;
+        }
+        List<Long> pointIds = points.stream().map(TreeNodeDTO::getId).toList();
+        Map<Long, PointAntiSlipMatDTO> ledgerMap = antiSlipMatService.getLedgerMapByPointIds(pointIds);
+        for (TreeNodeDTO point : points) {
+            PointAntiSlipMatDTO ledger = ledgerMap.get(point.getId());
+            point.setAntiSlipMatIssuedCount(ledger != null ? ledger.getIssuedCount() : 0);
+            point.setAntiSlipMatReturnedCount(ledger != null ? ledger.getReturnedCount() : 0);
+            point.setAntiSlipMatDamagedCount(ledger != null ? ledger.getDamagedCount() : 0);
+            point.setAntiSlipMatOutstandingCount(ledger != null ? ledger.getOutstandingCount() : 0);
+        }
+    }
+
+    /**
+     * 填充路段的防滑垫未还清点位数与未还数量加总：直接统计树上已填充的点位标记，
+     * 保证路段标记、点位标记、领用台账三处同源一致。
+     */
+    private void fillSectionAntiSlipMatOutstanding(java.util.Collection<TreeNodeDTO> nodes) {
+        for (TreeNodeDTO node : nodes) {
+            if (node.getLevel() != null && node.getLevel() == 2) {
+                int pointCount = 0;
+                int matCount = 0;
+                for (TreeNodeDTO point : node.getChildren()) {
+                    int outstanding = point.getAntiSlipMatOutstandingCount() != null
+                            ? point.getAntiSlipMatOutstandingCount() : 0;
+                    if (outstanding > 0) {
+                        pointCount++;
+                        matCount += outstanding;
+                    }
+                }
+                node.setAntiSlipMatOutstandingPointCount(pointCount);
+                node.setAntiSlipMatOutstandingMatCount(matCount);
+            }
+        }
+    }
+
+    /**
+     * 平铺返回路段时，按路段下点位批量查询防滑垫领用汇总并填充未还清点位数，
+     * 口径与街区树完整返回一致。
+     */
+    private void fillSectionAntiSlipMatOutstandingByQuery(List<TreeNodeDTO> sections) {
+        if (sections == null || sections.isEmpty()) {
+            return;
+        }
+        List<Long> sectionIds = sections.stream().map(TreeNodeDTO::getId).toList();
+        List<TreeNode> points = treeNodeRepository.findByParentIdInAndIsDeletedFalse(sectionIds);
+        Map<Long, int[]> statsBySection = new HashMap<>();
+        if (!points.isEmpty()) {
+            List<Long> pointIds = points.stream().map(TreeNode::getId).toList();
+            Map<Long, PointAntiSlipMatDTO> ledgerMap = antiSlipMatService.getLedgerMapByPointIds(pointIds);
+            for (TreeNode point : points) {
+                PointAntiSlipMatDTO ledger = ledgerMap.get(point.getId());
+                int outstanding = ledger != null && ledger.getOutstandingCount() != null
+                        ? ledger.getOutstandingCount() : 0;
+                if (outstanding > 0) {
+                    int[] stats = statsBySection.computeIfAbsent(point.getParentId(), k -> new int[2]);
+                    stats[0]++;
+                    stats[1] += outstanding;
+                }
+            }
+        }
+        for (TreeNodeDTO section : sections) {
+            int[] stats = statsBySection.get(section.getId());
+            section.setAntiSlipMatOutstandingPointCount(stats != null ? stats[0] : 0);
+            section.setAntiSlipMatOutstandingMatCount(stats != null ? stats[1] : 0);
         }
     }
 

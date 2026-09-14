@@ -49,6 +49,8 @@ class TreeNodeServiceClosureTest {
     @Mock
     private AdditionalBenchPlanService additionalBenchPlanService;
     @Mock
+    private AntiSlipMatService antiSlipMatService;
+    @Mock
     private BenchSponsorshipService benchSponsorshipService;
 
     @InjectMocks
